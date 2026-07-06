@@ -59,8 +59,9 @@ async function pdfToDataUrl(file) {
 export default function SiteSetup() {
   const navigate = useNavigate()
   const {
-    ready, selectedProject,
+    ready, projects, selectedProject,
     floorPlanUrl, hotspots,
+    createProject, switchProject,
     uploadFloorPlan, addHotspot, removeHotspot, saveLayout,
   } = useSite()
 
@@ -73,6 +74,12 @@ export default function SiteSetup() {
   const panStart    = useRef({ mx: 0, my: 0, tx: 0, ty: 0 })
   const wrapRef     = useRef(null)    // outer clipping div
   const innerRef    = useRef(null)    // transformed div
+
+  // ── Create project inline state ────────────────────────────────────────────
+  const [showCreate,  setShowCreate]  = useState(false)
+  const [newProj,     setNewProj]     = useState({ name: '', location: '', floors: '' })
+  const [newRooms,    setNewRooms]    = useState([])   // [{id, name}]
+  const [newRoomRow,  setNewRoomRow]  = useState({ id: '', name: '' })
 
   // ── Misc UI state ─────────────────────────────────────────────────────────
   const [saved,       setSaved]       = useState(false)
@@ -95,6 +102,27 @@ export default function SiteSetup() {
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
   }, [])
+
+  // ── Create project with rooms ────────────────────────────────────────────
+  const handleCreateProject = () => {
+    if (!newProj.name.trim())     { toast.error('Enter project name'); return }
+    if (!newProj.location.trim()) { toast.error('Enter location');     return }
+    const floors = parseInt(newProj.floors)
+    if (!floors || floors < 1)    { toast.error('Enter valid floor count'); return }
+    createProject(newProj.name.trim(), newProj.location.trim(), floors, newRooms)
+    setNewProj({ name: '', location: '', floors: '' })
+    setNewRooms([])
+    setNewRoomRow({ id: '', name: '' })
+    setShowCreate(false)
+    toast.success('Project created')
+  }
+
+  const handleAddRoomRow = () => {
+    if (!newRoomRow.id.trim()) { toast.error('Enter Room ID'); return }
+    if (newRooms.some(r => r.id === newRoomRow.id.trim())) { toast.error('Room ID already added'); return }
+    setNewRooms(prev => [...prev, { id: newRoomRow.id.trim(), name: newRoomRow.name.trim() }])
+    setNewRoomRow({ id: '', name: '' })
+  }
 
   // ── Floor plan upload (image OR pdf) ─────────────────────────────────────
   const handleFloorUpload = async (e) => {
@@ -236,18 +264,137 @@ export default function SiteSetup() {
   // ── GATE: no project selected ─────────────────────────────────────────────
   if (!selectedProject) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
-        justifyContent: 'center', height: '70vh', gap: 16 }}>
-        <div style={{ fontSize: 52 }}>🏗️</div>
-        <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 20, fontWeight: 700,
-          color: 'var(--text-1)' }}>No active project</h2>
-        <p style={{ fontSize: 14, color: 'var(--text-3)', textAlign: 'center', maxWidth: 360 }}>
-          Select a project from the <strong>Active Project</strong> dropdown in the sidebar
-          before setting up a floor plan.
-        </p>
-        <button className="btn-primary" onClick={() => navigate('/projects')}>
-          Go to Projects →
-        </button>
+      <div style={{ padding: 32, maxWidth: 600, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div style={{ fontSize: 44, marginBottom: 10 }}>🏗️</div>
+          <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 20, fontWeight: 700,
+            color: 'var(--text-1)', marginBottom: 6 }}>No active project</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
+            Select an existing project from the sidebar, or create a new one below.
+          </p>
+        </div>
+
+        {/* Existing projects quick-select */}
+        {projects.length > 0 && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13,
+              marginBottom: 10 }}>Existing projects</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {projects.map(p => (
+                <button key={p.id} onClick={() => switchProject(p)} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '9px 12px', background: 'var(--bg-hover)',
+                  border: '1px solid var(--border)', borderRadius: 8,
+                  cursor: 'pointer', fontSize: 13, color: 'var(--text-1)',
+                  textAlign: 'left', transition: 'border-color .15s',
+                }}
+                  onMouseOver={e => e.currentTarget.style.borderColor = '#D32F2F'}
+                  onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
+                      {p.location} · {p.floors} floor{p.floors !== 1 ? 's' : ''}
+                      {p.rooms?.length ? ` · ${p.rooms.length} rooms` : ''}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 18, color: '#D32F2F' }}>→</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Create new project */}
+        {!showCreate ? (
+          <button className="btn-primary" onClick={() => setShowCreate(true)}
+            style={{ width: '100%', padding: 12, fontSize: 14 }}>
+            + Create new project
+          </button>
+        ) : (
+          <div className="card">
+            <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 14,
+              marginBottom: 16 }}>New project</div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label className="label">Project name *</label>
+                <input placeholder="e.g. Taj Solitaire, Floor 3"
+                  value={newProj.name}
+                  onChange={e => setNewProj(p => ({ ...p, name: e.target.value }))} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 10 }}>
+                <div>
+                  <label className="label">Location *</label>
+                  <input placeholder="e.g. Mumbai" value={newProj.location}
+                    onChange={e => setNewProj(p => ({ ...p, location: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="label">Floors *</label>
+                  <input type="number" min="1" placeholder="5" value={newProj.floors}
+                    onChange={e => setNewProj(p => ({ ...p, floors: e.target.value }))} />
+                </div>
+              </div>
+
+              {/* Room IDs builder */}
+              <div>
+                <label className="label">Room IDs
+                  <span style={{ textTransform: 'none', letterSpacing: 0, fontSize: 10,
+                    color: 'var(--text-3)', marginLeft: 4 }}>
+                    (optional — add now to speed up hotspot mapping later)
+                  </span>
+                </label>
+
+                {/* Add room row */}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                  <input placeholder="Room ID (e.g. R-101)" value={newRoomRow.id}
+                    onChange={e => setNewRoomRow(r => ({ ...r, id: e.target.value.toUpperCase() }))}
+                    onKeyDown={e => { if (e.key === 'Enter') handleAddRoomRow() }}
+                    style={{ flex: '0 0 130px' }} />
+                  <select value={newRoomRow.name}
+                    onChange={e => setNewRoomRow(r => ({ ...r, name: e.target.value }))}
+                    style={{ flex: 1 }}>
+                    <option value="">Room type…</option>
+                    {ROOM_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <button onClick={handleAddRoomRow} className="btn-ghost"
+                    style={{ whiteSpace: 'nowrap', padding: '8px 12px', fontSize: 12 }}>
+                    + Add
+                  </button>
+                </div>
+
+                {/* Room list */}
+                {newRooms.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {newRooms.map(r => (
+                      <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 5,
+                        background: '#FFEBEE', border: '1px solid #FFCDD2',
+                        borderRadius: 20, padding: '3px 10px 3px 12px',
+                        fontSize: 12, color: '#C62828' }}>
+                        <span style={{ fontWeight: 600 }}>{r.id}</span>
+                        {r.name && <span style={{ color: '#666', fontWeight: 400 }}>— {r.name}</span>}
+                        <button onClick={() => setNewRooms(prev => prev.filter(x => x.id !== r.id))}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer',
+                            color: '#C62828', fontSize: 14, lineHeight: 1, padding: '0 0 0 2px' }}>
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <button className="btn-primary" onClick={handleCreateProject} style={{ flex: 1 }}>
+                  Create project
+                </button>
+                <button className="btn-ghost" onClick={() => setShowCreate(false)} style={{ flex: 1 }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -524,14 +671,53 @@ export default function SiteSetup() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <label className="label">Room ID <span style={{ color: '#D32F2F' }}>*</span></label>
-                <input
-                  autoFocus
-                  placeholder="e.g. R-101, B-202"
-                  value={roomForm.roomId}
-                  onChange={e => setRoomForm(f => ({ ...f, roomId: e.target.value }))}
-                  onKeyDown={e => { if (e.key === 'Enter') handleRoomModalSave(); if (e.key === 'Escape') setPendingDot(null) }}
-                  style={{ marginTop: 5 }}
-                />
+                {/* If project has predefined rooms → show dropdown, else free text */}
+                {selectedProject?.rooms?.length > 0 ? (
+                  <select
+                    autoFocus
+                    value={roomForm.roomId}
+                    onChange={e => {
+                      const selected = selectedProject.rooms.find(r => r.id === e.target.value)
+                      setRoomForm(f => ({
+                        ...f,
+                        roomId:   e.target.value,
+                        // Auto-fill Room Name from project rooms if available
+                        roomName: selected?.name || f.roomName,
+                      }))
+                    }}
+                    onKeyDown={e => { if (e.key === 'Escape') setPendingDot(null) }}
+                    style={{ marginTop: 5 }}
+                  >
+                    <option value="">— Select room ID —</option>
+                    {selectedProject.rooms
+                      .filter(r => !hotspots.some(h => h.roomId === r.id))  // hide already mapped
+                      .map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.id}{r.name ? ` — ${r.name}` : ''}
+                        </option>
+                      ))
+                    }
+                    <option value="__custom__">+ Enter manually</option>
+                  </select>
+                ) : (
+                  <input
+                    autoFocus
+                    placeholder="e.g. R-101, B-202"
+                    value={roomForm.roomId}
+                    onChange={e => setRoomForm(f => ({ ...f, roomId: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') handleRoomModalSave(); if (e.key === 'Escape') setPendingDot(null) }}
+                    style={{ marginTop: 5 }}
+                  />
+                )}
+                {/* Manual entry fallback when __custom__ selected */}
+                {roomForm.roomId === '__custom__' && (
+                  <input
+                    autoFocus
+                    placeholder="Type Room ID manually"
+                    style={{ marginTop: 8 }}
+                    onChange={e => setRoomForm(f => ({ ...f, roomId: e.target.value }))}
+                  />
+                )}
               </div>
               <div>
                 <label className="label">Room Name <span style={{ color: '#D32F2F' }}>*</span></label>

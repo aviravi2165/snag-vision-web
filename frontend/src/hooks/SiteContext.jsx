@@ -124,8 +124,8 @@ export function SiteProvider({ children }) {
   }, [])
 
   // ── Create / select project ─────────────────────────────────────────────
-  const createProject = useCallback((name, location = '', floors = 1) => {
-    const p = { id: `proj_${Date.now()}`, name, location, floors, hotspots: [] }
+  const createProject = useCallback((name, location = '', floors = 1, rooms = []) => {
+    const p = { id: `proj_${Date.now()}`, name, location, floors, rooms, hotspots: [] }
     setProjects(prev => {
       const next = [...prev, p]
       persistProjects(next)
