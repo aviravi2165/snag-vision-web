@@ -13,9 +13,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-print("API KEY:", os.getenv("gemini_api_key"))
+# Built lazily — constructing genai.Client() at import time raises if no key is
+# configured, which used to crash the whole server on boot even for callers
+# (like the mobile app) that never touch AI analysis.
+_client = None
 
-client = genai.Client(api_key=os.getenv("gemini_api_key"))
+
+def _get_client():
+    global _client
+    if _client is None:
+        api_key = os.getenv("gemini_api_key")
+        if not api_key:
+            raise RuntimeError("gemini_api_key is not configured")
+        _client = genai.Client(api_key=api_key)
+    return _client
 
 ANALYSIS_PROMPT = """
 You are an expert furniture manufacturing and quality inspector.
@@ -82,7 +93,7 @@ async def analyse_image(image_b64, *args, **kwargs):
         
         for attempt in range(MAX_RETRIES):
             try:
-                response = await client.aio.models.generate_content(
+                response = await _get_client().aio.models.generate_content(
                     model='gemini-2.5-flash', # Yahan check kar lena model name correct ho
                     contents=[ANALYSIS_PROMPT, image],
                     config=types.GenerateContentConfig(

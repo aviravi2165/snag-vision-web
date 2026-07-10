@@ -3,8 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from config import settings
-from models import init_db
-from routers import auth, projects, uploads, analysis
+from models import init_db, SessionLocal
+from routers import auth, projects, uploads, analysis, mobile
+from seed import seed_demo_data
 
 app = FastAPI(
     title="SiteIQ — Interior Construction Monitoring API",
@@ -24,6 +25,7 @@ app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(uploads.router)
 app.include_router(analysis.router)
+app.include_router(mobile.router)
 
 # Serve local uploads (POC fallback when GCS not configured)
 uploads_dir = Path("./uploads")
@@ -34,6 +36,11 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 @app.on_event("startup")
 def on_startup():
     init_db()
+    db = SessionLocal()
+    try:
+        seed_demo_data(db)
+    finally:
+        db.close()
 
 
 @app.get("/health")

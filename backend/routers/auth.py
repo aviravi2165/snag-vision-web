@@ -15,6 +15,7 @@ TOKEN_EXPIRE_HOURS = 48
 
 
 def hash_pw(pw: str) -> str:
+    
     return pwd_ctx.hash(pw)
 
 
