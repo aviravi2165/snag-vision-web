@@ -51,6 +51,9 @@ class Project(Base):
     floors = relationship("Floor", back_populates="project", cascade="all, delete")
     milestones = relationship("Milestone", back_populates="project", cascade="all, delete")
     estimated_completion_date = Column(DateTime, nullable=True)
+    # Lightweight floor/room list for the Site (Layout Setup) subsystem — [{number, rooms:[{id,name}]}].
+    # Named site_floors (not "floors") because that name is already the Floor relationship above.
+    site_floors = Column(JSON, nullable=True)
 
 class Floor(Base):
     __tablename__ = "floors"
@@ -128,3 +131,32 @@ class Milestone(Base):
     target_date = Column(DateTime)
     achieved = Column(Boolean, default=False)
     project = relationship("Project", back_populates="milestones")
+
+
+class FloorPlan(Base):
+    __tablename__ = "floor_plans"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    floor_number = Column(Integer, nullable=False)
+    image_url = Column(String(500), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Hotspot(Base):
+    __tablename__ = "hotspots"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    floor_number = Column(Integer, nullable=False)
+    x_pct = Column(Float, nullable=False)
+    y_pct = Column(Float, nullable=False)
+    room_id = Column(String(255))
+    room_name = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class HotspotCapture(Base):
+    __tablename__ = "hotspot_captures"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    hotspot_id = Column(String(36), ForeignKey("hotspots.id"), nullable=False)
+    image_url = Column(String(500))
+    captured_at = Column(DateTime, default=datetime.utcnow)

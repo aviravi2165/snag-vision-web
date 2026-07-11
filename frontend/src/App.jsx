@@ -3,15 +3,14 @@ import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import Sidebar from './components/Sidebar'
 import Login from './pages/Login'
+import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import FloorView from './pages/FloorView'
 import Upload from './pages/Upload'
 import AnalysisPage from './pages/Analysis'
 import Projects from './pages/Projects'
 import { ProjectProvider } from './hooks/useProject'
-import FloorMap from './pages/FloorMap'
 import PanoramaViewer from './pages/PanoramaViewer'
-import ProgressTracker from './pages/ProgressTracker'
 import { SiteProvider } from './hooks/SiteContext'
 import SiteSetup   from './pages/SiteSetup'
 import SiteCapture from './pages/SiteCapture'
@@ -42,14 +41,13 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/floors" element={<ProtectedRoute><FloorView /></ProtectedRoute>} />
       <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
       <Route path="/analysis" element={<ProtectedRoute><AnalysisPage /></ProtectedRoute>} />
-      <Route path="/floormap" element={<ProtectedRoute><FloorMap /></ProtectedRoute>} />
       <Route path="/panorama" element={<ProtectedRoute><PanoramaViewer /></ProtectedRoute>} />
       <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
-      <Route path="/tracker" element={<ProtectedRoute><ProgressTracker /></ProtectedRoute>} />
       <Route path="/site-setup"   element={<ProtectedRoute><SiteSetup /></ProtectedRoute>} />
       <Route path="/site-capture" element={<ProtectedRoute><SiteCapture /></ProtectedRoute>} />
       

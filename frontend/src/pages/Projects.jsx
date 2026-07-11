@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
-import { getProjects, createProject, getFloors, addFloor, getUnits, addUnit, getRooms, addRoom } from '../utils/api'
+import { createProject, getFloors, addFloor, getUnits, addUnit, getRooms, addRoom } from '../utils/api'
+import { useProject } from '../hooks/useProject'
 
 const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder, type = 'text' }) => {
   const [val, setVal] = useState('')
@@ -37,14 +38,13 @@ const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder
 }
 
 export default function Projects() {
-  const [projects, setProjects] = useState([])
+  const { projects, addProject } = useProject()
   const [floors, setFloors] = useState([])
   const [units, setUnits] = useState([])
   const [rooms, setRooms] = useState([])
   const [sel, setSel] = useState({ project: null, floor: null, unit: null })
   const [newProj, setNewProj] = useState({ name: '', location: '', total_floors: 5, planned_completion: '' })
 
-  useEffect(() => { getProjects().then(({ data }) => setProjects(data)) }, [])
   useEffect(() => {
     if (!sel.project) return
     getFloors(sel.project).then(({ data }) => { setFloors(data); setSel(s => ({ ...s, floor: null, unit: null })); setUnits([]); setRooms([]) })
@@ -68,7 +68,7 @@ export default function Projects() {
       : null,
   }
   const { data } = await createProject(payload)
-  setProjects(p => [...p, data])
+  addProject(data)
   toast.success('Project created')
   setNewProj({ name: '', location: '', total_floors: 5, planned_completion: '' })
 }
@@ -109,7 +109,7 @@ export default function Projects() {
         <Col title="Projects" addPlaceholder="Project name" type="text"
           items={projects.map(p => ({ id: p.id, label: p.name, sub: undefined }))}
           selected={sel.project} onSelect={id => setSel({ project: id, floor: null, unit: null })}
-          onAdd={name => { createProject({ name, total_floors: 5 }).then(({ data }) => { setProjects(p => [...p, data]); toast.success('Project created') }) }} />
+          onAdd={name => { createProject({ name, total_floors: 5 }).then(({ data }) => { addProject(data); toast.success('Project created') }) }} />
 
         <Col title="Floors" addPlaceholder="Floor number" type="number"
           items={floors.map(f => ({ id: f.id, label: `Floor ${f.floor_number}`, sub: f.progress_pct }))}

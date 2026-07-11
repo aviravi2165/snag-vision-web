@@ -137,3 +137,26 @@ class ProjectDashboard(BaseModel):
     est_completion: Optional[str]
     weekly_trend: List[Dict]
 
+
+# --- Site (Layout Setup / Site Capture / Panorama persistence) ---
+class SiteRoomIn(BaseModel):
+    id: str
+    name: str
+
+class SiteFloorIn(BaseModel):
+    number: int
+    rooms: List[SiteRoomIn] = []
+
+class SiteProjectCreate(BaseModel):
+    name: str
+    location: Optional[str] = None
+    total_floors: int = 1
+    floors: List[SiteFloorIn] = []
+
+class HotspotCreate(BaseModel):
+    floor_number: int
+    x_pct: float
+    y_pct: float
+    room_id: Optional[str] = None
+    room_name: Optional[str] = None
+

@@ -32,3 +32,25 @@ export const uploadMedia = (formData) =>
 export const getRoomUploads = (roomId) => api.get(`/uploads/room/${roomId}`)
 export const getRoomAnalysis = (roomId) => api.get(`/analysis/room/${roomId}/latest`)
 export const getChangeDetection = (roomId) => api.get(`/analysis/room/${roomId}/change-detection`)
+
+// ─── Site (Layout Setup / Site Capture / Panorama persistence) ──────────────
+export const createSiteProject = (data) => api.post('/site/projects', data)
+export const getSiteProjects = () => api.get('/site/projects')
+export const getSiteProject = (id) => api.get(`/site/projects/${id}`)
+
+export const uploadFloorPlanApi = (projectId, floorNum, formData) =>
+  api.post(`/site/projects/${projectId}/floor-plan/${floorNum}`, formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } })
+export const getFloorPlanApi = (projectId, floorNum) =>
+  api.get(`/site/projects/${projectId}/floor-plan/${floorNum}`)
+
+export const addHotspotApi = (projectId, data) => api.post(`/site/projects/${projectId}/hotspots`, data)
+export const getHotspotsApi = (projectId, floorNumber) =>
+  api.get(`/site/projects/${projectId}/hotspots`, { params: { floor_number: floorNumber } })
+export const deleteHotspotApi = (hotspotId) => api.delete(`/site/hotspots/${hotspotId}`)
+
+export const captureHotspotApi = (hotspotId, formData) =>
+  api.post(`/site/hotspots/${hotspotId}/capture`, formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } })
+export const getHotspotCaptureApi = (hotspotId) => api.get(`/site/hotspots/${hotspotId}/capture`)
+export const deleteHotspotCaptureApi = (hotspotId) => api.delete(`/site/hotspots/${hotspotId}/capture`)

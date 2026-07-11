@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from config import settings
 from models import init_db
-from routers import auth, projects, uploads, analysis
+from routers import auth, projects, uploads, analysis, site
 
 app = FastAPI(
     title="SiteIQ — Interior Construction Monitoring API",
@@ -24,6 +24,7 @@ app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(uploads.router)
 app.include_router(analysis.router)
+app.include_router(site.router)
 
 # Serve local uploads (POC fallback when GCS not configured)
 uploads_dir = Path("./uploads")
