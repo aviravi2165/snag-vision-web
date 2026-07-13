@@ -7,7 +7,7 @@ from models import init_db
 from routers import auth, projects, uploads, analysis, site
 
 app = FastAPI(
-    title="SiteIQ — Interior Construction Monitoring API",
+    title="SnagVision — Interior Construction Monitoring API",
     version="1.0.0",
     description="AI-powered interior construction progress tracking for IEVO",
 )
@@ -39,4 +39,4 @@ def on_startup():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "SiteIQ API"}
+    return {"status": "ok", "service": "SnagVision API"}

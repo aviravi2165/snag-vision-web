@@ -41,7 +41,7 @@ export default function Sidebar() {
         <div>
           <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700,
             fontSize: 15, color: '#111111', letterSpacing: '-0.03em' }}>
-            SiteIQ
+            SnagVision
           </div>
           <div style={{ fontSize: 10, color: '#999999', letterSpacing: '.05em',
             textTransform: 'uppercase' }}>

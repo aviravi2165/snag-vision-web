@@ -15,7 +15,9 @@ import { getUnits, getRooms } from '../utils/api'
 import toast from 'react-hot-toast'
 
 // ─── Hotspot visual constants ──────────────────────────────────────────────────
-const DOT_R       = 2.5    // base radius in CSS px (at zoom=1)
+const DOT_D       = 8      // visible dot diameter in CSS px (rendered at fixed size, then
+                            // scaled via CSS transform — not shrunk to sub-pixel widths — so
+                            // it stays crisp instead of blurry when the floor plan is zoomed in)
 const HIT_PAD     = 12     // click hit area padding around dot
 
 // ─── Helper: convert PDF page → data URL via canvas ───────────────────────────
@@ -197,7 +199,7 @@ export default function SiteSetup() {
       const py = h.y_pct * rect.height
       const cx = e.clientX - rect.left
       const cy = e.clientY - rect.top
-      return Math.hypot(px - cx, py - cy) <= (DOT_R * transform.scale) + HIT_PAD
+      return Math.hypot(px - cx, py - cy) <= (DOT_D / 2) + HIT_PAD
     })
     if (hit) return
 
@@ -627,10 +629,15 @@ export default function SiteSetup() {
 export function HotspotDot({ hotspot, captured, active, hovered, zoom = 1,
   interactive = true, onContextMenu, onClick, onHover }) {
 
-  // Keep visual size stable across zoom levels
-  const visualR  = DOT_R / (zoom || 1)   // px in the transformed space = constant screen size
-  const visualD  = visualR * 2
-  const hitArea  = (DOT_R + HIT_PAD) / (zoom || 1) * 2
+  // Hit area still scales with zoom so the click target keeps matching the visible dot's
+  // on-screen size (percentage-based positioning means the parent's own space is pre-zoom).
+  const hitArea = (DOT_D / 2 + HIT_PAD) / (zoom || 1) * 2
+
+  // The dot itself is rendered at a fixed, normal pixel size (crisp — no sub-pixel border/
+  // shadow widths) and then scaled down via a GPU transform to counteract the floor plan's
+  // zoom. Shrinking the actual width/border to fractional px (the old approach) is what
+  // caused the blur at high zoom — transform: scale() stays crisp at any factor.
+  const dotScale = (hovered || active ? 1.3 : 1) / (zoom || 1)
 
   const color = active   ? '#6366F1'
               : captured ? '#22C55E'
@@ -659,27 +666,18 @@ export function HotspotDot({ hotspot, captured, active, hovered, zoom = 1,
         justifyContent: 'center',
       }}
     >
-      {/* Visual dot — flat solid fill, stays constant screen size regardless of zoom */}
+      {/* Visual dot — fixed real size, scaled via transform (crisp at any zoom) */}
       <div style={{
-        width:        visualD,
-        height:       visualD,
+        width:        DOT_D,
+        height:       DOT_D,
         borderRadius: '50%',
         background:   color,
-        border:       `${1.5 / (zoom || 1)}px solid ${border}`,
-        boxShadow:    hovered || active ? `0 0 0 ${2 / (zoom||1)}px ${color}66` : 'none',
+        border:       `2px solid ${border}`,
+        boxShadow:    hovered || active ? `0 0 0 3px ${color}66` : 'none',
         transition:   'transform .15s ease, box-shadow .15s ease',
-        transform:    hovered || active ? 'scale(1.3)' : 'scale(1)',
+        transform:    `scale(${dotScale})`,
         pointerEvents: 'none',   // hit area handled by parent
       }} />
-
-      {/* Captured checkmark */}
-      {captured && !active && (
-        <div style={{ position: 'absolute', top: 0, right: 0,
-          width: 6 / (zoom||1), height: 6 / (zoom||1), borderRadius: '50%',
-          background: '#22C55E', border: `1px solid #fff`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 4 / (zoom||1), color: '#fff', fontWeight: 900 }}>✓</div>
-      )}
     </div>
   )
 }
