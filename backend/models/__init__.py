@@ -21,6 +21,20 @@ def _migrate_add_missing_columns():
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE projects ADD site_floors NVARCHAR(MAX) NULL"))
 
+    if "spots" in inspector.get_table_names():
+        spot_cols = {c["name"] for c in inspector.get_columns("spots")}
+        if "client_spot_id" not in spot_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE spots ADD client_spot_id NVARCHAR(64) NULL"))
+                # Filtered index, not a plain unique constraint — MSSQL only
+                # allows one NULL total under a plain unique index/constraint,
+                # and most existing spots (created via the web admin route)
+                # have no client_spot_id at all.
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX ix_spots_client_spot_id ON spots(client_spot_id) "
+                    "WHERE client_spot_id IS NOT NULL"
+                ))
+
 
 def init_db():
     Base.metadata.create_all(bind=engine)

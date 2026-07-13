@@ -100,6 +100,17 @@ class SpotOut(BaseModel):
         from_attributes = True
 
 
+# Mobile's offline-first spot sync — camelCase to match this router's own
+# convention (see upload_photo's Form(...) params in routers/mobile.py).
+class MobileSpotCreate(BaseModel):
+    clientSpotId: str
+    roomId: str
+    name: str
+    coordinateX: float
+    coordinateY: float
+    sortOrder: int = 1
+
+
 # --- Upload ---
 class UploadOut(BaseModel):
     id: str

@@ -13,7 +13,7 @@ from jose import jwt, JWTError
 from config import settings
 from models import get_db
 from models.database import User, Project, Room, Spot, MediaUpload, UploadStatus
-from schemas.models import LoginIn
+from schemas.models import LoginIn, MobileSpotCreate
 from routers.auth import verify_pw, create_token, ALGORITHM
 from routers.uploads import _run_analysis
 from services.gcs_service import upload_media
@@ -159,3 +159,58 @@ def uploads_status(ids: str, db: Session = Depends(get_db), user_id: str = Depen
     rows = db.query(MediaUpload).filter(MediaUpload.client_photo_id.in_(id_list)).all()
     found = {r.client_photo_id: {"id": r.id, "status": r.status.value} for r in rows}
     return [{"photoId": i, **(found.get(i) or {"id": None, "status": "not_found"})} for i in id_list]
+
+
+# ── Spots (offline-first create/delete) ────────────────────────────────────
+
+def _spot_out(spot: Spot):
+    return {
+        "SpotId": spot.id,
+        "SpotName": spot.name,
+        "RoomId": spot.room_id,
+        "CoordinateX": spot.coordinate_x,
+        "CoordinateY": spot.coordinate_y,
+        "SortOrder": spot.sort_order,
+    }
+
+
+@router.post("/spots")
+def create_spot_mobile(
+    data: MobileSpotCreate,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    # Idempotency: a retried sync re-sends the same clientSpotId — return the
+    # already-landed record instead of creating a duplicate.
+    existing = db.query(Spot).filter(Spot.client_spot_id == data.clientSpotId).first()
+    if existing:
+        return _spot_out(existing)
+
+    room = db.query(Room).get(data.roomId)
+    if not room:
+        raise HTTPException(404, "Room not found")
+
+    spot = Spot(
+        room_id=data.roomId,
+        name=data.name,
+        coordinate_x=data.coordinateX,
+        coordinate_y=data.coordinateY,
+        sort_order=data.sortOrder,
+        client_spot_id=data.clientSpotId,
+    )
+    db.add(spot)
+    db.commit()
+    db.refresh(spot)
+    return _spot_out(spot)
+
+
+@router.delete("/spots/{spot_id}", status_code=204)
+def delete_spot_mobile(spot_id: str, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
+    # Unlike routers/projects.py's delete_spot, missing/already-deleted is
+    # treated as success — a retried sync delete after an interrupted
+    # response must not be logged as a failure and retried forever.
+    spot = db.query(Spot).get(spot_id)
+    if spot:
+        db.delete(spot)
+        db.commit()
+    return

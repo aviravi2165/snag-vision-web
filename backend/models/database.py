@@ -132,6 +132,10 @@ class Spot(Base):
     coordinate_x = Column(Float, nullable=False)  # normalized 0..1, relative to the floor plan image
     coordinate_y = Column(Float, nullable=False)
     sort_order = Column(Integer, default=1)
+    # The mobile app's local queue id — lets a retried offline-sync create
+    # find (and return) the record that already landed instead of creating
+    # a duplicate. Mirrors MediaUpload.client_photo_id's pattern.
+    client_spot_id = Column(String(64), nullable=True, unique=True, index=True)
     room = relationship("Room", back_populates="spots")
 
 
