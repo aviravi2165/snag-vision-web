@@ -21,6 +21,14 @@ export function AuthProvider({ children }) {
     return data.user
   }
 
+  const register = async (payload) => {
+    const { data } = await apiRegister(payload)
+    localStorage.setItem('siteiq_token', data.access_token)
+    localStorage.setItem('siteiq_user', JSON.stringify(data.user))
+    setUser(data.user)
+    return data.user
+  }
+
   const logout = () => {
     localStorage.removeItem('siteiq_token')
     localStorage.removeItem('siteiq_user')
@@ -28,7 +36,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthCtx.Provider value={{ user, login, logout, loading }}>
+    <AuthCtx.Provider value={{ user, login, register, logout, loading }}>
       {children}
     </AuthCtx.Provider>
   )

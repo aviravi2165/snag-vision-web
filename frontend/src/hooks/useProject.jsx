@@ -28,8 +28,16 @@ export function ProjectProvider({ children }) {
     localStorage.setItem('siteiq_project_id', projectId)
   }
 
+  // Called after a project is created elsewhere (Projects page) so the sidebar's
+  // "Active project" dropdown and every other consumer of this context updates immediately.
+  const addProject = (project) => {
+    setProjects(prev => [...prev, project])
+    setSelectedProject(project)
+    localStorage.setItem('siteiq_project_id', project.id)
+  }
+
   return (
-    <ProjectCtx.Provider value={{ projects, selectedProject, switchProject, loading }}>
+    <ProjectCtx.Provider value={{ projects, selectedProject, switchProject, addProject, loading }}>
       {children}
     </ProjectCtx.Provider>
   )
