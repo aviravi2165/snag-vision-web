@@ -6,6 +6,9 @@ backend/__pycache__/
 # Environment files
 backend/.env
 
+# Local dev database (SQLite)
+backend/*.db
+
 # Uploads
 backend/uploads/
 

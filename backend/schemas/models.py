@@ -36,6 +36,8 @@ class ProjectCreate(BaseModel):
     total_floors: int = 1
     planned_completion: Optional[datetime] = None
     estimated_completion_date: Optional[datetime] = None
+    folder: Optional[str] = None
+    city: Optional[str] = None
 
 class ProjectOut(BaseModel):
     id: str
@@ -45,6 +47,8 @@ class ProjectOut(BaseModel):
     planned_completion: Optional[datetime]
     created_at: datetime
     progress_pct: Optional[float] = None
+    folder: Optional[str] = None
+    city: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -59,6 +63,7 @@ class FloorOut(BaseModel):
     floor_number: int
     label: Optional[str]
     progress_pct: float
+    plan_image_url: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -73,6 +78,24 @@ class RoomOut(BaseModel):
     name: str
     progress_pct: float
     last_analysed: Optional[datetime]
+    class Config:
+        from_attributes = True
+
+
+# --- Spot (floor-plan capture pin) ---
+class SpotCreate(BaseModel):
+    name: str
+    coordinate_x: float  # normalized 0..1, relative to the floor plan image
+    coordinate_y: float
+    sort_order: int = 1
+
+class SpotOut(BaseModel):
+    id: str
+    room_id: str
+    name: str
+    coordinate_x: float
+    coordinate_y: float
+    sort_order: int
     class Config:
         from_attributes = True
 
