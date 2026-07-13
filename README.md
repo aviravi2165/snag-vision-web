@@ -1,4 +1,4 @@
-# SiteIQ — Interior Construction Monitoring Platform
+# SnagVision— Interior Construction Monitoring Platform
 
 AI-powered construction progress tracking for IEVO. Built for POC demo.
 
