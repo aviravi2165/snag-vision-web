@@ -5,13 +5,11 @@ import { useProject } from '../hooks/useProject'
 const links = [
   { to: '/dashboard', icon: '▦',  label: 'Executive'    },
   { to: '/floors',    icon: '⊟',  label: 'Floor view'   },
-  { to: '/upload',    icon: '↑',   label: 'Upload'       },
   { to: '/analysis',  icon: '◈',  label: 'AI analysis'  },
-  { to: '/floormap',  icon: '🗺',  label: 'Floor plan'   },
+  { to: '/upload',    icon: '↑',   label: 'Upload'       },
   { to: '/panorama',  icon: '🔭',  label: 'Panorama'     },
-  { to: '/tracker',   icon: '🏗',  label: 'Site Tracker' },
-  { to: '/site-setup',   icon: '📐', label: 'Layout Setup' },
   { to: '/site-capture', icon: '📸', label: 'Site Capture' },
+  { to: '/site-setup',   icon: '📐', label: 'Layout Setup' },
   { to: '/projects',  icon: '⚙',  label: 'Projects'     },
 ]
 

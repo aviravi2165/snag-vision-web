@@ -19,7 +19,8 @@ import toast from 'react-hot-toast'
 export default function SiteCapture() {
   const navigate  = useNavigate()
   const {
-    ready, selectedProject, floorPlanUrl, hotspots, capturedImages,
+    ready, selectedProject, floors, selectedFloorId, setSelectedFloorId,
+    floorPlanUrl, hotspots, capturedImages,
     captureHotspot, removeCapture,
   } = useSite()
 
@@ -62,7 +63,7 @@ export default function SiteCapture() {
     if (!panelFile || !activeHotspot) return
     setSubmitting(true)
     try {
-      await captureHotspot(activeHotspot.id, panelFile)
+      await captureHotspot(activeHotspot, panelFile)
       toast.success(`Point captured successfully`, { icon: '✅' })
       closePanel()
     } catch (e) {
@@ -89,10 +90,15 @@ export default function SiteCapture() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
+  // ── Close panel whenever the selected floor changes (its hotspots no longer apply) ──
+  useEffect(() => { closePanel() }, [selectedFloorId])
+
+  const selectedFloor = floors.find(f => f.id === selectedFloorId) || null
+
   // ── Loading / empty states ─────────────────────────────────────────────────
   if (!ready) return <Loader />
 
-  if (!selectedProject || !floorPlanUrl) {
+  if (!selectedProject || !floors.length) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
         justifyContent: 'center', height: 500, gap: 16 }}>
@@ -174,11 +180,20 @@ export default function SiteCapture() {
           {/* Map header */}
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-dim)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            background: 'var(--bg-surface)' }}>
+            flexWrap: 'wrap', gap: 10, background: 'var(--bg-surface)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>
-                🗺 {selectedProject.name} — Floor Plan
+                🗺 {selectedProject.name}
               </span>
+              <select
+                value={selectedFloorId || ''}
+                onChange={e => setSelectedFloorId(e.target.value)}
+                disabled={!floors.length}
+                style={{ width: 'auto', fontSize: 12, fontWeight: 600 }}
+              >
+                {!floors.length && <option value="">No floors</option>}
+                {floors.map(f => <option key={f.id} value={f.id}>Floor {f.floor_number}</option>)}
+              </select>
             </div>
             <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-3)' }}>
               <LegendItem color="#F5C842" label="Pending" />
@@ -189,38 +204,54 @@ export default function SiteCapture() {
 
           {/* Interactive map */}
           <div style={{ position: 'relative', background: '#0a0c11', userSelect: 'none' }}>
-            <img
-              src={floorPlanUrl}
-              alt="floor plan"
-              draggable={false}
-              style={{ display: 'block', width: '100%', height: 'auto', pointerEvents: 'none' }}
-            />
-
-            {/* Hotspot dots — percentage based, auto-scale with image */}
-            {hotspots.map(h => (
-              <HotspotDot
-                key={h.id}
-                hotspot={h}
-                captured={!!capturedImages[h.id]}
-                active={activeHotspot?.id === h.id}
-                interactive={true}
-                onClick={openPanel}
-              />
-            ))}
-
-            {/* Click-anywhere reminder if no dots */}
-            {hotspots.length === 0 && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex',
-                alignItems: 'center', justifyContent: 'center',
-                background: 'rgba(0,0,0,0.5)' }}>
-                <div style={{ fontSize: 14, color: 'var(--text-3)', textAlign: 'center', padding: 24 }}>
-                  No hotspots configured.<br />
-                  <button onClick={() => navigate('/site-setup')} style={{
-                    background: 'none', border: 'none', color: 'var(--amber)',
-                    cursor: 'pointer', fontSize: 14, marginTop: 8, textDecoration: 'underline',
-                  }}>Go to Setup to add hotspots →</button>
+            {!floorPlanUrl ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
+                justifyContent: 'center', minHeight: 360, gap: 10, padding: 24 }}>
+                <div style={{ fontSize: 40 }}>🗺️</div>
+                <div style={{ fontSize: 14, color: 'var(--text-3)', textAlign: 'center' }}>
+                  No floor plan uploaded for Floor {selectedFloor?.floor_number}.
                 </div>
+                <button onClick={() => navigate('/site-setup')} style={{
+                  background: 'none', border: 'none', color: 'var(--amber)',
+                  cursor: 'pointer', fontSize: 13, textDecoration: 'underline',
+                }}>Go to Setup to upload one →</button>
               </div>
+            ) : (
+              <>
+                <img
+                  src={floorPlanUrl}
+                  alt="floor plan"
+                  draggable={false}
+                  style={{ display: 'block', width: '100%', height: 'auto', pointerEvents: 'none' }}
+                />
+
+                {/* Hotspot dots — percentage based, auto-scale with image */}
+                {hotspots.map(h => (
+                  <HotspotDot
+                    key={h.id}
+                    hotspot={h}
+                    captured={!!capturedImages[h.id]}
+                    active={activeHotspot?.id === h.id}
+                    interactive={true}
+                    onClick={openPanel}
+                  />
+                ))}
+
+                {/* Click-anywhere reminder if no dots */}
+                {hotspots.length === 0 && (
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.5)' }}>
+                    <div style={{ fontSize: 14, color: 'var(--text-3)', textAlign: 'center', padding: 24 }}>
+                      No hotspots configured.<br />
+                      <button onClick={() => navigate('/site-setup')} style={{
+                        background: 'none', border: 'none', color: 'var(--amber)',
+                        cursor: 'pointer', fontSize: 14, marginTop: 8, textDecoration: 'underline',
+                      }}>Go to Setup to add hotspots →</button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

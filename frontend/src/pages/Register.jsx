@@ -3,17 +3,29 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 
-export default function Login() {
-  const { login } = useAuth()
-  const navigate  = useNavigate()
-  const [form,    setForm]    = useState({ email: '', password: '' })
+const ROLES = [
+  { value: 'site_supervisor', label: 'Site supervisor' },
+  { value: 'project_manager', label: 'Project manager' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'client', label: 'Client' },
+]
+
+export default function Register() {
+  const { register } = useAuth()
+  const navigate = useNavigate()
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'site_supervisor' })
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault(); setLoading(true)
-    try { await login(form.email, form.password); navigate('/dashboard') }
-    catch { toast.error('Invalid credentials') }
-    finally { setLoading(false) }
+    try {
+      await register(form)
+      navigate('/dashboard')
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Registration failed')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -49,12 +61,17 @@ export default function Login() {
           </div>
         </div>
 
-        <h2 style={{ fontSize: 18, marginBottom: 4, color: '#111111' }}>Sign in</h2>
+        <h2 style={{ fontSize: 18, marginBottom: 4, color: '#111111' }}>Create account</h2>
         <p style={{ fontSize: 13, color: '#666666', marginBottom: 24 }}>
           Interior Construction Monitoring
         </p>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label className="label">Name</label>
+            <input placeholder="Your name" value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })} required />
+          </div>
           <div>
             <label className="label">Email</label>
             <input type="email" placeholder="you@ievo.in" value={form.email}
@@ -63,23 +80,22 @@ export default function Login() {
           <div>
             <label className="label">Password</label>
             <input type="password" placeholder="••••••••" value={form.password}
-              onChange={e => setForm({ ...form, password: e.target.value })} required />
+              onChange={e => setForm({ ...form, password: e.target.value })} required minLength={6} />
+          </div>
+          <div>
+            <label className="label">Role</label>
+            <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
+              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
           </div>
           <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: 4 }}>
-            {loading ? 'Signing in…' : 'Sign in →'}
+            {loading ? 'Creating account…' : 'Create account →'}
           </button>
         </form>
 
-        <div style={{ marginTop: 20, padding: '10px 14px',
-          background: '#F8F7F4', borderRadius: 8,
-          fontSize: 12, color: '#666666', lineHeight: 1.6 }}>
-          <span style={{ color: '#444444', fontWeight: 500 }}>Demo:</span>{' '}
-          admin@ievo.in / password123
-        </div>
-
-        <div style={{ marginTop: 16, textAlign: 'center', fontSize: 13, color: '#666666' }}>
-          Don't have an account?{' '}
-          <Link to="/register" style={{ color: '#D32F2F', fontWeight: 500 }}>Create one</Link>
+        <div style={{ marginTop: 20, textAlign: 'center', fontSize: 13, color: '#666666' }}>
+          Already have an account?{' '}
+          <Link to="/login" style={{ color: '#D32F2F', fontWeight: 500 }}>Sign in</Link>
         </div>
       </div>
     </div>

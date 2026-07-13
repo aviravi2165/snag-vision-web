@@ -1,4 +1,4 @@
-# SiteIQ — Interior Construction Monitoring Platform
+# SnagVision— Interior Construction Monitoring Platform
 
 AI-powered construction progress tracking for IEVO. Built for POC demo.
 
@@ -8,57 +8,32 @@ AI-powered construction progress tracking for IEVO. Built for POC demo.
 
 | Layer | Tech |
 |---|---|
-| Frontend | React 18 + Vite + Tailwind + Recharts |
+| Frontend | React 18 + Vite + Tailwind + Recharts + Three.js |
 | Backend | FastAPI + SQLAlchemy |
-| AI | Gemini API (multimodal image analysis) |
-| Database | PostgreSQL 16 |
-| Storage | Google Cloud Storage (local fallback for POC) |
-| Vector DB | ChromaDB (for embedding history) |
+| AI | Google Gemini 2.5 Flash (multimodal image analysis) |
+| Database | MS SQL Server (via pyodbc) |
+| Storage | Google Cloud Storage (local `./uploads/` fallback for POC) |
 
 ---
 
-## Quick start — Docker (recommended)
-
-```bash
-# 1. Clone and enter directory
-cd siteiq
-
-# 2. Copy and fill env file
-cp backend/.env.example backend/.env
-# → Add your COHERE_API_KEY at minimum
-
-# 3. Start all services
-docker-compose up --build
-
-# 4. Open
-# Frontend:  http://localhost:5173
-# API docs:  http://localhost:8000/docs
-```
-
----
-
-## Manual setup (no Docker)
+## Setup
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.11+ (with a working SQL Server ODBC driver installed)
 - Node 20+
-- PostgreSQL running locally
+- MS SQL Server instance reachable from `DATABASE_URL`
 
 ### Backend
 
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+venv\Scripts\activate        # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# Edit .env — add COHERE_API_KEY and DATABASE_URL
+# Edit .env — set DATABASE_URL and gemini_api_key at minimum
 
-# Create DB
-createdb siteiq
-
-# Run
 uvicorn main:app --reload --port 8000
 ```
 
@@ -70,68 +45,67 @@ npm install
 npm run dev
 ```
 
+Open `http://localhost:5173` (frontend) and `http://localhost:8000/docs` (API docs).
+
 ---
 
-## Environment variables
+## Environment variables (`backend/.env`)
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `COHERE_API_KEY` | Yes | Get from dashboard.cohere.com |
-| `GCS_BUCKET_NAME` | No | GCS bucket (falls back to ./uploads/) |
-| `GCS_PROJECT_ID` | No | GCP project ID |
-| `GOOGLE_APPLICATION_CREDENTIALS` | No | Path to GCS service account JSON |
+| `DATABASE_URL` | Yes | SQL Server connection string (`mssql+pyodbc://...`) |
+| `gemini_api_key` | Yes | Google Gemini API key |
 | `SECRET_KEY` | Yes | JWT signing key — change in prod |
+| `GCS_BUCKET_NAME` / `GCS_PROJECT_ID` / `GOOGLE_APPLICATION_CREDENTIALS` | No | GCS storage (falls back to `./uploads/` if unset) |
+| `CORS_ORIGINS` | No | Comma-separated allowed origins |
 
 ---
 
-## POC walkthrough
+## Core workflow
 
-1. **Register** at `/login` or use demo creds
-2. Go to **Project setup** → create project → add floors → add units → add rooms
-3. Go to **Upload** → select room → drag photos → click Upload & Analyse
-4. Cohere AI analyses the image in background (~5–10 seconds)
-5. Check **AI Analysis** page → see component-level breakdown + radar chart
-6. Check **Floor view** → room heatmap updates automatically
-7. Check **Executive dashboard** → overall progress, floor chart, delay tracker
+1. **Register / Sign in** (`/register`, `/login`).
+2. **Projects** → create a project, then build its hierarchy: Floor → Room ID (Unit) → Area (Room). This hierarchy is the single source of truth for every other page.
+3. **Upload** → pick a room, drag photos → Gemini analyses each one in the background (~5–10s) and returns a component-level completion breakdown.
+4. **AI analysis** → radar chart, progress-over-time, change-detection flags (`progress` / `stalled` / `rework`) per room.
+5. **Floor view** → room heatmap, auto-updated after every analysis.
+6. **Executive** → overall progress, floor chart, delay tracker.
+7. **Layout Setup** → per floor, upload a floor plan image/PDF and pin hotspots; each hotspot is mapped to a real Room ID → Area picked live from the Projects hierarchy (no duplicate data entry).
+8. **Site Capture** → pick a floor, tap a pinned hotspot, attach a photo. The photo is saved permanently to the backend (auto-timestamped) against that hotspot's real Room.
+9. **Panorama** *(Site Photo Viewer)* → filter Floor → Room ID → Room Name → Date to pull up a captured photo; **Split Comparison** shows two independently-filtered photos side by side.
+
+Progress rollup (room → unit → floor → project) recalculates automatically after every upload.
 
 ---
 
 ## API endpoints
 
 ```
-POST   /auth/register              Register user
-POST   /auth/login                 Login (returns JWT)
+POST   /auth/register                        Register user (returns JWT)
+POST   /auth/login                            Login (returns JWT)
 
-GET    /projects                   List all projects
-POST   /projects                   Create project
-GET    /projects/{id}/dashboard    Executive dashboard data
+GET    /projects                              List projects
+POST   /projects                              Create project
+GET    /projects/{id}/dashboard               Executive dashboard data
+POST   /projects/{id}/floors                  Add floor
+GET    /projects/{id}/floors                  List floors
+POST   /projects/floors/{id}/units            Add Room ID (Unit)
+GET    /projects/floors/{id}/units            List Room IDs
+POST   /projects/units/{id}/rooms             Add Area (Room)
+GET    /projects/units/{id}/rooms             List Areas
 
-POST   /projects/{id}/floors       Add floor
-GET    /projects/floors/{id}/units Add unit
-POST   /projects/units/{id}/rooms  Add room
+POST   /uploads                               Upload media (triggers AI in background)
+GET    /uploads/room/{id}                     List a room's uploads
 
-POST   /uploads                    Upload media (triggers AI)
-GET    /uploads/room/{id}          List room uploads
-
-GET    /analysis/room/{id}/latest         Latest AI result
-GET    /analysis/room/{id}/change-detection  History
+GET    /analysis/room/{id}/latest             Latest AI result
+GET    /analysis/room/{id}/change-detection   Full history
 ```
 
-Full interactive docs at `http://localhost:8000/docs`
+Full interactive docs at `http://localhost:8000/docs`.
 
 ---
 
-## GCS setup (optional for POC)
+## Known gaps (POC)
 
-If GCS creds not provided, all uploads save to `backend/uploads/` and serve via `/uploads/` route.
-For production: create a GCS bucket, download service account JSON, set path in `.env`.
-
----
-
-## Notes for sir demo
-
-- All AI calls go through Cohere's `command-r-plus` model
-- If Cohere vision isn't available on your tier, the service auto-falls back to text simulation
-- Progress aggregation: room → unit → floor → project rollup triggers automatically after each upload
-- Change detection flags: `progress` (+5%), `stalled` (≤2%), `rework` (−5%)
+- No route currently enforces JWT auth (tokens are issued but not verified).
+- No update/delete endpoints for the Floor/Unit/Room hierarchy — append-only via the API.
+- The old 3D 360° sphere panorama viewer was replaced by the Site Photo Viewer (Floor/Room/Date filters) — Three.js is still a dependency but no longer used on that page.

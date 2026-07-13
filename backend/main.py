@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from config import settings
 from models import init_db, SessionLocal
-from routers import auth, projects, uploads, analysis, mobile
+from routers import auth, projects, uploads, analysis, mobile, site
 from seed import seed_demo_data
 
 app = FastAPI(
@@ -26,6 +26,7 @@ app.include_router(projects.router)
 app.include_router(uploads.router)
 app.include_router(analysis.router)
 app.include_router(mobile.router)
+app.include_router(site.router)
 
 # Serve local uploads (POC fallback when GCS not configured)
 uploads_dir = Path("./uploads")
