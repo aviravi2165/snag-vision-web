@@ -2,7 +2,9 @@
 backend/venv/
 backend/__pycache__/
 *.pyc
-
+__pycache__/
+*.py[cod]
+*.pyo
 # Environment files
 backend/.env
 
