@@ -12,7 +12,7 @@ from jose import jwt, JWTError
 
 from config import settings
 from models import get_db
-from models.database import User, Project, Room, Spot, MediaUpload, UploadStatus, UserRole
+from models.database import User, Project, Floor, Room, Spot, FloorPlan, Hotspot, MediaUpload, UploadStatus, UserRole
 from schemas.models import LoginIn, MobileSpotCreate, UserCreate
 from routers.auth import verify_pw, hash_pw, create_token, ALGORITHM
 from routers.uploads import _run_analysis
@@ -106,6 +106,44 @@ def mobile_projects(db: Session = Depends(get_db), user_id: str = Depends(get_cu
     ]
 
 
+def _sync_hotspots_to_spots(db: Session, floor: Floor, hotspots: list[Hotspot]):
+    """Materializes the web Layout Setup's hotspots as real Spot rows so the
+    app can show and capture photos against whatever was built there,
+    without the app or the photo-upload FK requirements needing to know
+    hotspots exist at all. Idempotent — re-run on every structure read,
+    keyed by client_spot_id = 'hotspot:<hotspot.id>' so repeat reads update
+    (not duplicate) the same Spot, and a deleted hotspot's Spot is pruned."""
+    room = db.query(Room).filter(Room.floor_id == floor.id).first()
+    if not room:
+        room = Room(floor_id=floor.id, name="Layout")
+        db.add(room)
+        db.commit()
+        db.refresh(room)
+
+    current_keys = {f"hotspot:{hs.id}" for hs in hotspots}
+    materialized = db.query(Spot).filter(
+        Spot.room_id == room.id, Spot.client_spot_id.like("hotspot:%")
+    ).all()
+    for s in materialized:
+        if s.client_spot_id not in current_keys:
+            db.delete(s)
+
+    for idx, hs in enumerate(hotspots, start=1):
+        key = f"hotspot:{hs.id}"
+        name = hs.room_name or f"Spot {idx}"
+        spot = db.query(Spot).filter(Spot.client_spot_id == key).first()
+        if spot:
+            spot.coordinate_x, spot.coordinate_y = hs.x_pct, hs.y_pct
+            spot.name, spot.sort_order = name, idx
+        else:
+            db.add(Spot(
+                room_id=room.id, name=name,
+                coordinate_x=hs.x_pct, coordinate_y=hs.y_pct,
+                sort_order=idx, client_spot_id=key,
+            ))
+    db.commit()
+
+
 @router.get("/projects/{project_id}/structure")
 def mobile_structure(project_id: str, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     project = db.query(Project).get(project_id)
@@ -114,8 +152,26 @@ def mobile_structure(project_id: str, db: Session = Depends(get_db), user_id: st
 
     out = []
     for floor in sorted(project.floors, key=lambda f: f.floor_number):
+        floor_plan = (
+            db.query(FloorPlan)
+            .filter(FloorPlan.project_id == project_id, FloorPlan.floor_number == floor.floor_number)
+            .first()
+        )
+        plan_image_url = (floor_plan.image_url if floor_plan else None) or floor.plan_image_url
+
+        hotspots = (
+            db.query(Hotspot)
+            .filter(Hotspot.project_id == project_id, Hotspot.floor_number == floor.floor_number)
+            .order_by(Hotspot.created_at)
+            .all()
+        )
+        existing_room = db.query(Room).filter(Room.floor_id == floor.id).first()
+        if hotspots or existing_room:
+            _sync_hotspots_to_spots(db, floor, hotspots)
+
         rooms_out = []
-        for room in floor.rooms:
+        for room in db.query(Room).filter(Room.floor_id == floor.id).all():
+            spots = db.query(Spot).filter(Spot.room_id == room.id).order_by(Spot.sort_order).all()
             spots_out = [
                 {
                     "SpotId": s.id,
@@ -125,13 +181,13 @@ def mobile_structure(project_id: str, db: Session = Depends(get_db), user_id: st
                     "CoordinateY": s.coordinate_y,
                     "SortOrder": s.sort_order,
                 }
-                for s in sorted(room.spots, key=lambda s: s.sort_order)
+                for s in spots
             ]
             rooms_out.append({"RoomId": room.id, "RoomName": room.name, "ColorHex": None, "spots": spots_out})
         out.append({
             "FloorId": floor.id,
             "FloorName": floor.label or f"Floor {floor.floor_number}",
-            "FloorPlanImageUrl": floor.plan_image_url,
+            "FloorPlanImageUrl": plan_image_url,
             "rooms": rooms_out,
         })
     return out

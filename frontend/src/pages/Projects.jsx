@@ -38,7 +38,7 @@ const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder
 }
 
 export default function Projects() {
-  const { projects, addProject } = useProject()
+  const { projects, addProject, switchProject } = useProject()
   const [floors, setFloors] = useState([])
   const [units, setUnits] = useState([])
   const [rooms, setRooms] = useState([])
@@ -108,7 +108,8 @@ export default function Projects() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         <Col title="Projects" addPlaceholder="Project name" type="text"
           items={projects.map(p => ({ id: p.id, label: p.name, sub: undefined }))}
-          selected={sel.project} onSelect={id => setSel({ project: id, floor: null, unit: null })}
+          selected={sel.project}
+          onSelect={id => { setSel({ project: id, floor: null, unit: null }); switchProject(id) }}
           onAdd={name => { createProject({ name, total_floors: 5 }).then(({ data }) => { addProject(data); toast.success('Project created') }) }} />
 
         <Col title="Floors" addPlaceholder="Floor number" type="number"
