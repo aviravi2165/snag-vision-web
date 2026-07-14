@@ -12,9 +12,9 @@ from jose import jwt, JWTError
 
 from config import settings
 from models import get_db
-from models.database import User, Project, Room, Spot, MediaUpload, UploadStatus
-from schemas.models import LoginIn, MobileSpotCreate
-from routers.auth import verify_pw, create_token, ALGORITHM
+from models.database import User, Project, Room, Spot, MediaUpload, UploadStatus, UserRole
+from schemas.models import LoginIn, MobileSpotCreate, UserCreate
+from routers.auth import verify_pw, hash_pw, create_token, ALGORITHM
 from routers.uploads import _run_analysis
 from services.gcs_service import upload_media
 
@@ -37,6 +37,26 @@ def get_current_user_id(authorization: str = Header(None)) -> str:
     return user_id
 
 
+def get_current_mobile_user(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)) -> User:
+    user = db.query(User).get(user_id)
+    if not user:
+        raise HTTPException(401, "User not found")
+    return user
+
+
+def require_mobile_role(*roles: UserRole):
+    """Only the spot create/delete endpoints use this today — matches the
+    original spec ('only admin or manager can add/remove a spot'). Every
+    other /mobile/* endpoint stays open to any logged-in role, same as
+    before, so existing app flows for a site_supervisor account are
+    unaffected."""
+    def _check(user: User = Depends(get_current_mobile_user)) -> User:
+        if user.role not in roles:
+            raise HTTPException(403, "Not permitted for this role")
+        return user
+    return _check
+
+
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
 @router.post("/auth/login")
@@ -44,6 +64,25 @@ def mobile_login(data: LoginIn, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user or not verify_pw(data.password, user.hashed_password):
         raise HTTPException(401, "Invalid credentials")
+    return {
+        "token": create_token(user.id),
+        "user": {"id": user.id, "name": user.name, "email": user.email, "role": user.role.value},
+    }
+
+
+@router.post("/auth/register")
+def mobile_register(data: UserCreate, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == data.email).first():
+        raise HTTPException(400, "Email already registered")
+    user = User(
+        name=data.name,
+        email=data.email,
+        hashed_password=hash_pw(data.password),
+        role=data.role,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
     return {
         "token": create_token(user.id),
         "user": {"id": user.id, "name": user.name, "email": user.email, "role": user.role.value},
@@ -178,7 +217,7 @@ def _spot_out(spot: Spot):
 def create_spot_mobile(
     data: MobileSpotCreate,
     db: Session = Depends(get_db),
-    user_id: str = Depends(get_current_user_id),
+    user: User = Depends(require_mobile_role(UserRole.admin, UserRole.project_manager)),
 ):
     # Idempotency: a retried sync re-sends the same clientSpotId — return the
     # already-landed record instead of creating a duplicate.
@@ -205,7 +244,11 @@ def create_spot_mobile(
 
 
 @router.delete("/spots/{spot_id}", status_code=204)
-def delete_spot_mobile(spot_id: str, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
+def delete_spot_mobile(
+    spot_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_mobile_role(UserRole.admin, UserRole.project_manager)),
+):
     # Unlike routers/projects.py's delete_spot, missing/already-deleted is
     # treated as success — a retried sync delete after an interrupted
     # response must not be logged as a failure and retried forever.

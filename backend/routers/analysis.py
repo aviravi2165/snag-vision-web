@@ -3,9 +3,10 @@ from sqlalchemy.orm import Session
 from models import get_db
 from models.database import AIAnalysis, Room
 from schemas.models import AnalysisOut
+from routers.auth import get_current_user
 from typing import List
 
-router = APIRouter(prefix="/analysis", tags=["analysis"])
+router = APIRouter(prefix="/analysis", tags=["analysis"], dependencies=[Depends(get_current_user)])
 
 @router.get("/room/{room_id}", response_model=List[AnalysisOut])
 def get_room_analyses(room_id: str, limit: int = 10, db: Session = Depends(get_db)):

@@ -1,16 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from models import get_db
-from models.database import Project, Floor, Unit, Room, Spot
+from models.database import Project, Floor, Unit, Room, Spot, UserRole
 from schemas.models import (
     ProjectCreate, ProjectOut, FloorCreate, FloorOut,
     UnitCreate, RoomCreate, RoomOut, SpotCreate, SpotOut,
 )
 from services.progress_service import build_dashboard
 from services.gcs_service import upload_media
+from routers.auth import get_current_user, require_role
 from typing import List
 
-router = APIRouter(prefix="/projects", tags=["projects"])
+# Any logged-in user (site_supervisor/project_manager/admin/client) can use
+# this router today — the web frontend has no role-specific UI yet, so
+# restricting by role here would silently break whichever role's account
+# happens to be testing with. Individual destructive/admin-only endpoints
+# (e.g. delete_project below) opt into a stricter role check explicitly.
+router = APIRouter(prefix="/projects", tags=["projects"], dependencies=[Depends(get_current_user)])
 
 
 # ── Projects ─────────────────────────────────────────────────────────────────
@@ -35,6 +41,19 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     if not p:
         raise HTTPException(404, "Project not found")
     return p
+
+
+@router.delete("/{project_id}", status_code=204)
+def delete_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(UserRole.admin)),
+):
+    p = db.query(Project).get(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+    db.delete(p)
+    db.commit()
 
 
 @router.get("/{project_id}/dashboard")

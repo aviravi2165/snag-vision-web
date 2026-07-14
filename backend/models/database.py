@@ -97,7 +97,7 @@ class Room(Base):
     last_analysed = Column(DateTime)
     unit = relationship("Unit", back_populates="rooms")
     floor = relationship("Floor", back_populates="rooms")
-    uploads = relationship("MediaUpload", back_populates="room")
+    uploads = relationship("MediaUpload", back_populates="room", cascade="all, delete")
     analyses = relationship("AIAnalysis", back_populates="room", cascade="all, delete")
     spots = relationship("Spot", back_populates="room", cascade="all, delete")
 
@@ -120,7 +120,7 @@ class MediaUpload(Base):
     spot_id = Column(String(36), ForeignKey("spots.id"), nullable=True)
     room = relationship("Room", back_populates="uploads")
     supervisor = relationship("User", back_populates="uploads")
-    analysis = relationship("AIAnalysis", back_populates="upload", uselist=False)
+    analysis = relationship("AIAnalysis", back_populates="upload", uselist=False, cascade="all, delete")
 
 
 class Spot(Base):

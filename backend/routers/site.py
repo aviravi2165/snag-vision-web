@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session
 from models import get_db
 from models.database import Project, FloorPlan, Hotspot, HotspotCapture
 from schemas.models import SiteProjectCreate, HotspotCreate
+from routers.auth import get_current_user
 
-router = APIRouter(prefix="/site", tags=["site"])
+router = APIRouter(prefix="/site", tags=["site"], dependencies=[Depends(get_current_user)])
 
 UPLOAD_DIR = Path("./uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)

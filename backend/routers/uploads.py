@@ -8,10 +8,11 @@ from services.gcs_service import upload_media
 from services.gemini_service import analyse_image, compute_change_flag
 from services.progress_service import full_rollup
 from models.database import AIAnalysis
+from routers.auth import get_current_user
 from typing import List
 import mimetypes
 
-router = APIRouter(prefix="/uploads", tags=["uploads"])
+router = APIRouter(prefix="/uploads", tags=["uploads"], dependencies=[Depends(get_current_user)])
 
 IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp"}
 MAX_SIZE_MB = 20
