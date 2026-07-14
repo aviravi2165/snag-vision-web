@@ -3,6 +3,9 @@ import { getFloors, getUnits, getRooms, getRoomAnalysis } from '../utils/api'
 // ✅ FIX 1: useProject import — local project state completely hataya
 import { useProject } from '../hooks/useProject'
 import { Spinner, ProgressBar, StatusBadge, ProgressRing, SectionTitle, Empty } from '../components/UI'
+import FloorViewNew from './FloorViewNew'
+
+const NEW_FLOORVIEW_KEY = 'snagvision_new_floorview_enabled'
 
 function heatStyle(pct) {
   if (pct >= 95) return { bg: 'rgba(34,197,94,.12)', border: 'rgba(34,197,94,.25)', text: '#4ADE80' }
@@ -12,7 +15,7 @@ function heatStyle(pct) {
   return { bg: 'rgba(239,68,68,.1)', border: 'rgba(239,68,68,.2)', text: '#F87171' }
 }
 
-export default function FloorView() {
+function FloorViewClassic() {
   // ✅ FIX 2: Global context se selectedProject lo
   // BUG: Pehle local state thi jo hamesha first project (Taj) set karti thi
   // aur global context ka change kabhi reach nahi karta tha
@@ -222,6 +225,59 @@ export default function FloorView() {
             )}
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+// ── Feature toggle: lets you try the new Floor View layout and switch back to
+// the classic one instantly — nothing about FloorViewClassic above is touched. ──
+export default function FloorView() {
+  const [isNewFloorViewEnabled, setIsNewFloorViewEnabled] = useState(
+    () => localStorage.getItem(NEW_FLOORVIEW_KEY) === 'true'
+  )
+
+  const toggle = () => {
+    setIsNewFloorViewEnabled(v => {
+      const next = !v
+      localStorage.setItem(NEW_FLOORVIEW_KEY, String(next))
+      return next
+    })
+  }
+
+  return (
+    <div>
+      {/* Thin toggle bar — sits above whichever layout is active, doesn't affect its padding */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        gap: 8, padding: '10px 28px 0' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          {isNewFloorViewEnabled ? 'New Floor View layout' : 'Try new Floor View layout'}
+        </span>
+        <div
+          role="switch"
+          aria-checked={isNewFloorViewEnabled}
+          onClick={toggle}
+          title="Toggle between classic and new Floor View layout"
+          style={{
+            width: 38, height: 21, borderRadius: 11, cursor: 'pointer',
+            background: isNewFloorViewEnabled ? 'var(--amber)' : 'var(--border, #D5D5D5)',
+            position: 'relative', transition: 'background .2s', flexShrink: 0,
+          }}
+        >
+          <div style={{
+            position: 'absolute', top: 2, left: isNewFloorViewEnabled ? 19 : 2,
+            width: 17, height: 17, borderRadius: '50%', background: '#fff',
+            transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+          }} />
+        </div>
+      </div>
+
+      {isNewFloorViewEnabled ? (
+        <div style={{ padding: '18px 28px 28px' }}>
+          <FloorViewNew />
+        </div>
+      ) : (
+        <FloorViewClassic />
       )}
     </div>
   )

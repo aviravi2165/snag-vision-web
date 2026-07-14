@@ -26,7 +26,7 @@ function formatDate(isoDate) {
 
 // ─── 360° sphere viewer — drag to look around. Each instance is fully independent, ──
 // so split comparison mounts two of these side by side with no shared state.
-function Panorama360({ src, height = 320 }) {
+export function Panorama360({ src, height = 320 }) {
   const mountRef    = useRef(null)
   const rendererRef = useRef(null)
   const meshRef     = useRef(null)

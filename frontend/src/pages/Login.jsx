@@ -43,7 +43,7 @@ export default function Login() {
             fontSize: 16, color: '#FFFFFF' }}>S</div>
           <div>
             <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700,
-              fontSize: 17, color: '#111111', letterSpacing: '-0.03em' }}>SiteIQ</div>
+              fontSize: 17, color: '#111111', letterSpacing: '-0.03em' }}>SnagVision</div>
             <div style={{ fontSize: 10, color: '#999999', letterSpacing: '.06em',
               textTransform: 'uppercase' }}>by IEVO</div>
           </div>

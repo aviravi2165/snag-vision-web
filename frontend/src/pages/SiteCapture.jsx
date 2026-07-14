@@ -33,6 +33,50 @@ export default function SiteCapture() {
   const fileRef   = useRef(null)
   const cameraRef = useRef(null)
 
+  // ── Zoom + pan (scroll to zoom, drag to pan) ─────────────────────────────
+  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
+  const isPanning = useRef(false)
+  const panStart  = useRef({ mx: 0, my: 0, tx: 0, ty: 0 })
+  const wrapRef   = useRef(null)
+  const innerRef  = useRef(null)
+
+  useEffect(() => { setTransform({ x: 0, y: 0, scale: 1 }) }, [floorPlanUrl])
+
+  const handleWheel = useCallback((e) => {
+    e.preventDefault()
+    const wrap = wrapRef.current; if (!wrap) return
+    const rect = wrap.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    const mouseY = e.clientY - rect.top
+    const delta = e.deltaY < 0 ? 1.12 : 1 / 1.12
+    setTransform(prev => {
+      const newScale = Math.min(8, Math.max(0.3, prev.scale * delta))
+      const newX = mouseX - (mouseX - prev.x) * (newScale / prev.scale)
+      const newY = mouseY - (mouseY - prev.y) * (newScale / prev.scale)
+      return { scale: newScale, x: newX, y: newY }
+    })
+  }, [])
+
+  useEffect(() => {
+    const el = wrapRef.current; if (!el) return
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [handleWheel])
+
+  const handleMouseDown = (e) => {
+    if (e.button !== 0) return
+    if (e.target.dataset.hotspot) return   // don't pan when grabbing a hotspot
+    isPanning.current = true
+    panStart.current = { mx: e.clientX, my: e.clientY, tx: transform.x, ty: transform.y }
+  }
+  const handleMouseMove = useCallback((e) => {
+    if (!isPanning.current) return
+    const dx = e.clientX - panStart.current.mx
+    const dy = e.clientY - panStart.current.my
+    setTransform(prev => ({ ...prev, x: panStart.current.tx + dx, y: panStart.current.ty + dy }))
+  }, [])
+  const handleMouseUp = () => { isPanning.current = false }
+
   // ── Counts ─────────────────────────────────────────────────────────────────
   const totalPoints   = hotspots.length
   const capturedCount = Object.keys(capturedImages).length
@@ -203,7 +247,15 @@ export default function SiteCapture() {
           </div>
 
           {/* Interactive map */}
-          <div style={{ position: 'relative', background: '#0a0c11', userSelect: 'none' }}>
+          <div
+            ref={wrapRef}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            style={{ position: 'relative', overflow: 'hidden', background: '#0a0c11',
+              userSelect: 'none', cursor: floorPlanUrl ? (isPanning.current ? 'grabbing' : 'grab') : 'default' }}
+          >
             {!floorPlanUrl ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
                 justifyContent: 'center', minHeight: 360, gap: 10, padding: 24 }}>
@@ -217,7 +269,16 @@ export default function SiteCapture() {
                 }}>Go to Setup to upload one →</button>
               </div>
             ) : (
-              <>
+              <div
+                ref={innerRef}
+                style={{
+                  position: 'relative',
+                  transformOrigin: '0 0',
+                  transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+                  willChange: 'transform',
+                  lineHeight: 0,
+                }}
+              >
                 <img
                   src={floorPlanUrl}
                   alt="floor plan"
@@ -233,6 +294,7 @@ export default function SiteCapture() {
                     captured={!!capturedImages[h.id]}
                     active={activeHotspot?.id === h.id}
                     interactive={true}
+                    zoom={transform.scale}
                     onClick={openPanel}
                   />
                 ))}
@@ -251,7 +313,7 @@ export default function SiteCapture() {
                     </div>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
         </div>
