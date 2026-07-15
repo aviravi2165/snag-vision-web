@@ -54,20 +54,42 @@ def _migrate_add_missing_columns():
         if "client_spot_id" not in spot_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE spots ADD client_spot_id NVARCHAR(64) NULL"))
-                # Filtered index, not a plain unique constraint — MSSQL only
-                # allows one NULL total under a plain unique index/constraint,
-                # and most existing spots (created via the web admin route)
-                # have no client_spot_id at all.
-                conn.execute(text(
-                    "CREATE UNIQUE INDEX ix_spots_client_spot_id ON spots(client_spot_id) "
-                    "WHERE client_spot_id IS NOT NULL"
-                ))
+
+
+def _ensure_indexes():
+    """Guarantees the filtered unique index on spots.client_spot_id exists.
+    The model deliberately omits unique=True on that column (see
+    database.py's comment) so create_all() never creates a *plain* unique
+    index there — MSSQL treats all NULLs as equal under a plain unique
+    index/constraint, so it would only ever allow a single spot with no
+    client_spot_id (i.e. one normal, non-offline-synced spot per whole
+    database). This filtered index (unique only where the value is
+    actually set) is the real uniqueness guard, and always has to be
+    created explicitly either way — runs on every boot, cheap no-op once
+    correct."""
+    inspector = inspect(engine)
+    if "spots" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        row = conn.execute(text(
+            "SELECT filter_definition FROM sys.indexes "
+            "WHERE object_id = OBJECT_ID('spots') AND name = 'ix_spots_client_spot_id'"
+        )).first()
+        if row and row[0]:
+            return
+        if row:
+            conn.execute(text("DROP INDEX ix_spots_client_spot_id ON spots"))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX ix_spots_client_spot_id ON spots(client_spot_id) "
+            "WHERE client_spot_id IS NOT NULL"
+        ))
 
 
 def init_db():
     _ensure_database_exists()
     Base.metadata.create_all(bind=engine)
     _migrate_add_missing_columns()
+    _ensure_indexes()
 
 
 def get_db():
