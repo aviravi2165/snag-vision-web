@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
 from models import get_db
-from models.database import User
+from models.database import User, UserRole
 from schemas.models import UserCreate, UserOut, Token, LoginIn
 from passlib.context import CryptContext
-from jose import jwt
+from jose import jwt, JWTError
 from datetime import datetime, timedelta
 from config import settings
 
@@ -15,7 +15,7 @@ TOKEN_EXPIRE_HOURS = 48
 
 
 def hash_pw(pw: str) -> str:
-    
+
     return pwd_ctx.hash(pw)
 
 
@@ -28,9 +28,34 @@ def create_token(user_id: str) -> str:
     return jwt.encode({"sub": user_id, "exp": exp}, settings.SECRET_KEY, ALGORITHM)
 
 
-def get_current_user(token: str = Depends(lambda: None), db: Session = Depends(get_db)):
-    # Simplified — in prod use OAuth2PasswordBearer
-    pass
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)) -> User:
+    """Real JWT auth for the web-facing routers — the frontend's axios
+    interceptor (api.js) already attaches this header on every request once
+    logged in, and every data page is behind ProtectedRoute, so requiring
+    this here doesn't change what the frontend sends, only what the server
+    now checks."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+    user = db.query(User).get(payload.get("sub"))
+    if not user:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    return user
+
+
+def require_role(*roles: UserRole):
+    """Dependency factory: `Depends(require_role(UserRole.admin))` etc.
+    Only apply this where the allowed roles are actually known — plain
+    `Depends(get_current_user)` (any logged-in user) is the safe default."""
+    def _check(user: User = Depends(get_current_user)) -> User:
+        if user.role not in roles:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted for this role")
+        return user
+    return _check
 
 
 @router.post("/register", response_model=Token, status_code=201)
