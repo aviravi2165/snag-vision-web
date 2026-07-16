@@ -135,7 +135,12 @@ class Spot(Base):
     # The mobile app's local queue id — lets a retried offline-sync create
     # find (and return) the record that already landed instead of creating
     # a duplicate. Mirrors MediaUpload.client_photo_id's pattern.
-    client_spot_id = Column(String(64), nullable=True, unique=True, index=True)
+    # NOT unique=True here deliberately — most spots (created via the plain
+    # web form) never set this, and MSSQL's plain unique index only allows
+    # ONE null total (unlike Postgres/SQLite). Uniqueness among the rows
+    # that DO set it is enforced instead by a filtered index, set up in
+    # models/__init__.py's _ensure_indexes(), which allows unlimited nulls.
+    client_spot_id = Column(String(64), nullable=True, index=True)
     room = relationship("Room", back_populates="spots")
 
 

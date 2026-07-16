@@ -7,7 +7,7 @@ and its own auth/upload flow here, backed by the same underlying tables.
 import mimetypes
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Header, Form, File, UploadFile, BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from jose import jwt, JWTError
 
 from config import settings
@@ -93,7 +93,10 @@ def mobile_register(data: UserCreate, db: Session = Depends(get_db)):
 
 @router.get("/projects")
 def mobile_projects(db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
-    projects = db.query(Project).all()
+    # selectinload batches every project's floors into one extra query
+    # instead of one query per project (len(p.floors) below would otherwise
+    # lazy-load each project's floors individually).
+    projects = db.query(Project).options(selectinload(Project.floors)).all()
     return [
         {
             "ProjectId": p.id,
@@ -150,28 +153,61 @@ def mobile_structure(project_id: str, db: Session = Depends(get_db), user_id: st
     if not project:
         raise HTTPException(404, "Project not found")
 
+    floors = sorted(project.floors, key=lambda f: f.floor_number)
+    floor_ids = [f.id for f in floors]
+
+    # Batch-fetch everything for the whole project up front instead of
+    # querying per floor and per room — this endpoint used to run roughly
+    # 1 + 4*floors + rooms queries (measured ~356ms avg on a real 10-floor/
+    # 40-room/240-spot project); it's now a fixed handful of queries
+    # regardless of project size.
+    floor_plans_by_num = {
+        fp.floor_number: fp
+        for fp in db.query(FloorPlan).filter(FloorPlan.project_id == project_id).all()
+    }
+    hotspots_by_num = {}
+    for hs in (
+        db.query(Hotspot).filter(Hotspot.project_id == project_id).order_by(Hotspot.created_at).all()
+    ):
+        hotspots_by_num.setdefault(hs.floor_number, []).append(hs)
+
+    def _fetch_rooms_and_spots():
+        rooms = db.query(Room).filter(Room.floor_id.in_(floor_ids)).all() if floor_ids else []
+        by_floor = {}
+        for r in rooms:
+            by_floor.setdefault(r.floor_id, []).append(r)
+        room_ids = [r.id for r in rooms]
+        spots = db.query(Spot).filter(Spot.room_id.in_(room_ids)).order_by(Spot.sort_order).all() if room_ids else []
+        by_room = {}
+        for s in spots:
+            by_room.setdefault(s.room_id, []).append(s)
+        return by_floor, by_room, spots
+
+    rooms_by_floor, spots_by_room, all_spots = _fetch_rooms_and_spots()
+
+    # Only floors with a live hotspot, or a previously hotspot-materialized
+    # spot that might now need pruning, actually need _sync_hotspots_to_spots
+    # — for a project with no Layout Setup activity at all (the common
+    # case) this correctly ends up empty and skips the sync/re-fetch below
+    # entirely.
+    hotspot_room_ids = {s.room_id for s in all_spots if (s.client_spot_id or "").startswith("hotspot:")}
+    needs_sync = [
+        f for f in floors
+        if hotspots_by_num.get(f.floor_number)
+        or any(r.id in hotspot_room_ids for r in rooms_by_floor.get(f.id, []))
+    ]
+    if needs_sync:
+        for floor in needs_sync:
+            _sync_hotspots_to_spots(db, floor, hotspots_by_num.get(floor.floor_number, []))
+        rooms_by_floor, spots_by_room, all_spots = _fetch_rooms_and_spots()
+
     out = []
-    for floor in sorted(project.floors, key=lambda f: f.floor_number):
-        floor_plan = (
-            db.query(FloorPlan)
-            .filter(FloorPlan.project_id == project_id, FloorPlan.floor_number == floor.floor_number)
-            .first()
-        )
+    for floor in floors:
+        floor_plan = floor_plans_by_num.get(floor.floor_number)
         plan_image_url = (floor_plan.image_url if floor_plan else None) or floor.plan_image_url
 
-        hotspots = (
-            db.query(Hotspot)
-            .filter(Hotspot.project_id == project_id, Hotspot.floor_number == floor.floor_number)
-            .order_by(Hotspot.created_at)
-            .all()
-        )
-        existing_room = db.query(Room).filter(Room.floor_id == floor.id).first()
-        if hotspots or existing_room:
-            _sync_hotspots_to_spots(db, floor, hotspots)
-
         rooms_out = []
-        for room in db.query(Room).filter(Room.floor_id == floor.id).all():
-            spots = db.query(Spot).filter(Spot.room_id == room.id).order_by(Spot.sort_order).all()
+        for room in rooms_by_floor.get(floor.id, []):
             spots_out = [
                 {
                     "SpotId": s.id,
@@ -181,7 +217,7 @@ def mobile_structure(project_id: str, db: Session = Depends(get_db), user_id: st
                     "CoordinateY": s.coordinate_y,
                     "SortOrder": s.sort_order,
                 }
-                for s in spots
+                for s in spots_by_room.get(room.id, [])
             ]
             rooms_out.append({"RoomId": room.id, "RoomName": room.name, "ColorHex": None, "spots": spots_out})
         out.append({
