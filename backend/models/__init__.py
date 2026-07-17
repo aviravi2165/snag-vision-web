@@ -37,23 +37,39 @@ def _ensure_database_exists():
 
 def _migrate_add_missing_columns():
     """
-    create_all() only creates brand-new tables — it never alters existing ones.
-    This adds columns that were added to models after the table already existed
-    (e.g. Project.site_floors) so a live DB doesn't need a full migration tool for it.
+    create_all() only creates brand-new tables — it never alters existing
+    ones. Hand-picking which columns to migrate (the old approach here)
+    silently rots: every column added to a model after someone's database
+    already exists needs its own explicit ALTER, and it's easy to add one
+    and forget the migration line — which is exactly what happened
+    (Project.folder/city and Floor.plan_image_url were never added here,
+    so anyone whose database predates those columns gets "Invalid column
+    name" the moment a query touches them).
+
+    This instead walks every mapped model/table and adds whatever columns
+    exist in the model but not yet in the live database — self-healing
+    for *any* column added later, not just the ones we remembered to list.
+    Always adds as NULL-able regardless of the model's own nullable
+    setting, since existing rows have no value for a brand-new column and
+    MSSQL can't add a NOT NULL column to a non-empty table without one.
+    Doesn't add foreign-key constraints on the new column (none of the
+    columns this has needed to add so far require one) — a column that
+    both post-dates its table AND needs an FK would still need a manual
+    migration line.
     """
     inspector = inspect(engine)
-    if "projects" not in inspector.get_table_names():
-        return
-    existing_cols = {c["name"] for c in inspector.get_columns("projects")}
-    if "site_floors" not in existing_cols:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE projects ADD site_floors NVARCHAR(MAX) NULL"))
-
-    if "spots" in inspector.get_table_names():
-        spot_cols = {c["name"] for c in inspector.get_columns("spots")}
-        if "client_spot_id" not in spot_cols:
+    existing_tables = set(inspector.get_table_names())
+    for mapper in Base.registry.mappers:
+        table = mapper.local_table
+        if table is None or table.name not in existing_tables:
+            continue  # brand-new table — create_all() already handled it
+        existing_cols = {c["name"] for c in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing_cols:
+                continue
+            col_type = column.type.compile(dialect=engine.dialect)
             with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE spots ADD client_spot_id NVARCHAR(64) NULL"))
+                conn.execute(text(f"ALTER TABLE {table.name} ADD {column.name} {col_type} NULL"))
 
 
 def _ensure_indexes():
