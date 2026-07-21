@@ -25,6 +25,10 @@ export const addUnit = (floorId, data) => api.post(`/projects/floors/${floorId}/
 export const getUnits = (floorId) => api.get(`/projects/floors/${floorId}/units`)
 export const addRoom = (unitId, data) => api.post(`/projects/units/${unitId}/rooms`, data)
 export const getRooms = (unitId) => api.get(`/projects/units/${unitId}/rooms`)
+// "Flat" rooms hang directly off a Floor (no Unit) — this is the mobile app's
+// spot-capture flow. Spots are the finest-grained level under those rooms.
+export const getFloorRooms = (floorId) => api.get(`/projects/floors/${floorId}/rooms`)
+export const getRoomSpots = (roomId) => api.get(`/projects/rooms/${roomId}/spots`)
 
 // ─── Uploads & Analysis ─────────────────────────────────────────────────────
 export const uploadMedia = (formData) =>

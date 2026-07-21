@@ -15,7 +15,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import * as THREE from 'three'
 import { useProject } from '../hooks/useProject'
-import { getFloors, getUnits, getRooms, getRoomUploads } from '../utils/api'
+import { getFloors, getUnits, getRooms, getRoomUploads, getFloorRooms, getRoomSpots } from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
 
 function formatDate(isoDate) {
@@ -27,14 +27,14 @@ function formatDate(isoDate) {
 // ─── 360° sphere viewer — drag to look around. Each instance is fully independent, ──
 // so split comparison mounts two of these side by side with no shared state.
 export function Panorama360({ src, height = 320 }) {
-  const mountRef    = useRef(null)
+  const mountRef = useRef(null)
   const rendererRef = useRef(null)
-  const meshRef     = useRef(null)
-  const frameRef    = useRef(null)
-  const isDragging  = useRef(false)
-  const lastMouse   = useRef({ x: 0, y: 0 })
-  const yaw         = useRef(0)
-  const pitch       = useRef(0)
+  const meshRef = useRef(null)
+  const frameRef = useRef(null)
+  const isDragging = useRef(false)
+  const lastMouse = useRef({ x: 0, y: 0 })
+  const yaw = useRef(0)
+  const pitch = useRef(0)
 
   // Init Three.js scene once
   useEffect(() => {
@@ -43,8 +43,8 @@ export function Panorama360({ src, height = 320 }) {
     const W = mount.clientWidth || 600
     const H = mount.clientHeight || 320
 
-    const scene    = new THREE.Scene()
-    const camera   = new THREE.PerspectiveCamera(75, W / H, 0.1, 1000)
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(75, W / H, 0.1, 1000)
     camera.rotation.order = 'YXZ'
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(window.devicePixelRatio)
@@ -53,8 +53,8 @@ export function Panorama360({ src, height = 320 }) {
     mount.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    const geo  = new THREE.SphereGeometry(500, 60, 40)
-    const mat  = new THREE.MeshBasicMaterial({ color: 0x1a1d26, side: THREE.BackSide })
+    const geo = new THREE.SphereGeometry(500, 60, 40)
+    const mat = new THREE.MeshBasicMaterial({ color: 0x1a1d26, side: THREE.BackSide })
     const mesh = new THREE.Mesh(geo, mat)
     scene.add(mesh)
     meshRef.current = mesh
@@ -80,15 +80,15 @@ export function Panorama360({ src, height = 320 }) {
       const dx = e.clientX - lastMouse.current.x
       const dy = e.clientY - lastMouse.current.y
       lastMouse.current = { x: e.clientX, y: e.clientY }
-      yaw.current   -= dx * 0.3
+      yaw.current -= dx * 0.3
       pitch.current -= dy * 0.3
-      pitch.current  = Math.max(-85, Math.min(85, pitch.current))
+      pitch.current = Math.max(-85, Math.min(85, pitch.current))
       camera.rotation.y = THREE.MathUtils.degToRad(yaw.current)
       camera.rotation.x = THREE.MathUtils.degToRad(pitch.current)
     }
     const onUp = () => { isDragging.current = false }
     const onTouchStart = e => { const t = e.touches[0]; onDown({ clientX: t.clientX, clientY: t.clientY }) }
-    const onTouchMove  = e => { const t = e.touches[0]; onMove({ clientX: t.clientX, clientY: t.clientY }) }
+    const onTouchMove = e => { const t = e.touches[0]; onMove({ clientX: t.clientX, clientY: t.clientY }) }
 
     el.addEventListener('mousedown', onDown)
     window.addEventListener('mousemove', onMove)
@@ -112,35 +112,54 @@ export function Panorama360({ src, height = 320 }) {
   }, [])
 
   // Load/replace the panorama texture whenever the image changes
+  const [loadError, setLoadError] = useState(false)
   useEffect(() => {
     if (!src || !meshRef.current) return
+    setLoadError(false)
     const loader = new THREE.TextureLoader()
-    loader.load(src, tex => {
-      if (!meshRef.current) return
-      tex.needsUpdate = true
-      const mat = meshRef.current.material
-      mat.map = tex
-      mat.color.set(0xffffff)
-      mat.needsUpdate = true
-    })
+    loader.load(
+      src,
+      tex => {
+        if (!meshRef.current) return
+        tex.needsUpdate = true
+        const mat = meshRef.current.material
+        mat.map = tex
+        mat.color.set(0xffffff)
+        mat.needsUpdate = true
+      },
+      undefined,
+      err => {
+        console.error('Panorama360: failed to load texture', src, err)
+        setLoadError(true)
+      }
+    )
   }, [src])
 
   return (
     <div ref={mountRef} style={{
       width: '100%', height: '100%', minHeight: height, borderRadius: 10, overflow: 'hidden',
-      background: '#0d0f14', cursor: src ? 'grab' : 'default',
-    }} />
+      background: '#0d0f14', cursor: src ? 'grab' : 'default', position: 'relative',
+    }}>
+      {loadError && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+          justifyContent: 'center', color: 'var(--red, #e05252)', fontSize: 12, textAlign: 'center', padding: 16,
+        }}>
+          Couldn't load this image ({src})
+        </div>
+      )}
+    </div>
   )
 }
 
 // ─── One independent filter panel (Floor → Room ID → Room Name → Date → Image) ────
 function useImageCascade(projectId) {
-  const [floors,  setFloors]  = useState([])
+  const [floors, setFloors] = useState([])
   const [floorId, setFloorId] = useState('')
-  const [units,   setUnits]   = useState([])
-  const [unitId,  setUnitId]  = useState('')
-  const [rooms,   setRooms]   = useState([])
-  const [roomId,  setRoomId]  = useState('')
+  const [units, setUnits] = useState([])
+  const [unitId, setUnitId] = useState('')
+  const [rooms, setRooms] = useState([])
+  const [roomId, setRoomId] = useState('')
   const [uploads, setUploads] = useState([])
   const [dateKey, setDateKey] = useState('')
   const [loading, setLoading] = useState(false)
@@ -152,30 +171,70 @@ function useImageCascade(projectId) {
     getFloors(projectId).then(({ data }) => setFloors(data)).catch(() => setFloors([]))
   }, [projectId])
 
-  // Room ID (Units) for the chosen floor
+  // Room ID for the chosen floor — merges two independent data sources:
+  // hotel-flow Units (getUnits) and mobile-flow flat Rooms (getFloorRooms,
+  // Room.floor_id set directly, no Unit). Each option is tagged with `type`
+  // so the next two steps know which endpoint to call.
   useEffect(() => {
     setUnits([]); setUnitId('')
     if (!floorId) return
-    getUnits(floorId).then(({ data }) => setUnits(data)).catch(() => setUnits([]))
+    Promise.all([
+      getUnits(floorId).catch(() => ({ data: [] })),
+      getFloorRooms(floorId).catch(() => ({ data: [] })),
+    ]).then(([u, r]) => {
+      setUnits([
+        ...u.data.map(x => ({ id: x.id, label: x.unit_number, type: 'unit' })),
+        ...r.data.map(x => ({ id: x.id, label: `📍 ${x.name} (site capture)`, type: 'room' })),
+      ])
+    })
   }, [floorId])
 
-  // Room Name (Areas) for the chosen Room ID
+  // Room Name for the chosen Room ID — sub-Rooms if a hotel Unit was picked,
+  // or Spots if a mobile-flow flat Room was picked (spots are the finest
+  // level mobile captures against, there's no further sub-room under them).
   useEffect(() => {
     setRooms([]); setRoomId('')
-    if (!unitId) return
-    getRooms(unitId).then(({ data }) => setRooms(data)).catch(() => setRooms([]))
-  }, [unitId])
+    const sel = units.find(u => u.id === unitId)
+    if (!sel) return
+    if (sel.type === 'unit') {
+      getRooms(unitId)
+        .then(({ data }) => setRooms(data.map(x => ({ id: x.id, label: x.name, type: 'subroom' }))))
+        .catch(() => setRooms([]))
+    } else {
+      getRoomSpots(unitId)
+        .then(({ data }) => setRooms(data.map(x => ({ id: x.id, label: x.name, type: 'spot' }))))
+        .catch(() => setRooms([]))
+    }
+  }, [unitId, units])
 
-  // Uploaded photos for the chosen Room Name — drives the Date dropdown
+  // Uploaded photos for the chosen Room Name — drives the Date dropdown.
+  // A sub-room selection lists its own uploads directly. A spot selection
+  // has no room_id of its own to query — uploads are tagged with room_id
+  // (the parent flat Room) and, separately, spot_id — so this fetches the
+  // parent flat Room's uploads and narrows to the chosen spot client-side.
   useEffect(() => {
     setUploads([]); setDateKey('')
-    if (!roomId) return
+    const selRoom = rooms.find(r => r.id === roomId)
+    if (!selRoom) return
     setLoading(true)
-    getRoomUploads(roomId)
-      .then(({ data }) => setUploads(data.filter(u => u.media_type === 'photo' && u.status !== 'failed')))
-      .catch(() => setUploads([]))
+    const fetchId = selRoom.type === 'subroom' ? roomId : unitId
+    console.log('[PanoramaViewer] fetching uploads:', {
+      selectedRoomLabel: selRoom.label, selectedRoomType: selRoom.type,
+      roomIdSelected: roomId, fetchIdUsedForApi: fetchId,
+    })
+    getRoomUploads(fetchId)
+      .then(({ data }) => {
+        console.log('[PanoramaViewer] raw uploads for', fetchId, ':', data)
+        const filtered = data.filter(u =>
+          u.media_type === 'photo' && u.status !== 'failed' &&
+          (selRoom.type !== 'spot' || u.spot_id === roomId)
+        )
+        console.log('[PanoramaViewer] filtered uploads (spot match against roomId', roomId, '):', filtered)
+        setUploads(filtered)
+      })
+      .catch((e) => { console.error('[PanoramaViewer] getRoomUploads failed:', e); setUploads([]) })
       .finally(() => setLoading(false))
-  }, [roomId])
+  }, [roomId, rooms, unitId])
 
   // One entry per calendar date — latest upload of that date wins
   const dateOptions = useMemo(() => {
@@ -204,6 +263,18 @@ function FilterPanel({ title, cascade, viewerHeight = 560 }) {
     rooms, roomId, setRoomId, dateOptions, dateKey, setDateKey,
     activeUpload, loading } = cascade
 
+  // Mobile-captured spot photos are plain flat images, not true 360°
+  // equirectangular panoramas — the WebGL sphere viewer expects the latter
+  // and fails silently (no visible error) on anything else. Render those
+  // as a normal <img> instead; hotel-flow sub-room uploads keep the sphere.
+  const selRoomType = rooms.find(r => r.id === roomId)?.type
+  const isFlatPhoto = selRoomType === 'spot'
+
+  if (activeUpload) {
+    console.log('[PanoramaViewer] activeUpload:', activeUpload,
+      '-> image src:', activeUpload.gcs_url, '(spot_id on upload:', activeUpload.spot_id, ', selected roomId:', roomId, ')')
+  }
+
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {title && (
@@ -222,14 +293,14 @@ function FilterPanel({ title, cascade, viewerHeight = 560 }) {
           <label className="label">Room ID</label>
           <select value={unitId} onChange={e => setUnitId(e.target.value)} disabled={!units.length}>
             <option value="">{!floorId ? 'Select floor first' : units.length ? 'Select Room ID…' : 'No Room IDs'}</option>
-            {units.map(u => <option key={u.id} value={u.id}>{u.unit_number}</option>)}
+            {units.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
           </select>
         </div>
         <div>
           <label className="label">Room Name</label>
           <select value={roomId} onChange={e => setRoomId(e.target.value)} disabled={!rooms.length}>
             <option value="">{!unitId ? 'Select Room ID first' : rooms.length ? 'Select room…' : 'No rooms'}</option>
-            {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {rooms.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
         </div>
         <div>
@@ -243,13 +314,20 @@ function FilterPanel({ title, cascade, viewerHeight = 560 }) {
         </div>
       </div>
 
-      <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border-dim)',
+      <div style={{
+        borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border-dim)',
         background: 'var(--bg-base)', height: viewerHeight, display: 'flex',
-        alignItems: 'center', justifyContent: 'center' }}>
+        alignItems: 'center', justifyContent: 'center'
+      }}>
         {loading ? (
           <Spinner />
         ) : activeUpload ? (
-          <Panorama360 src={activeUpload.gcs_url} height={viewerHeight} />
+          isFlatPhoto ? (
+            <img src={activeUpload.gcs_url} alt="Captured spot"
+              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+          ) : (
+            <Panorama360 src={activeUpload.gcs_url} height={viewerHeight} />
+          )
         ) : (
           <Empty message="No image to show"
             hint="Select Floor, Room ID, Room Name and Date to view a photo" />
@@ -257,9 +335,11 @@ function FilterPanel({ title, cascade, viewerHeight = 560 }) {
       </div>
 
       {activeUpload && (
-        <div style={{ fontSize: 11, color: 'var(--text-3)', display: 'flex',
-          justifyContent: 'space-between' }}>
-          <span>🖱 Drag to look around</span>
+        <div style={{
+          fontSize: 11, color: 'var(--text-3)', display: 'flex',
+          justifyContent: 'space-between'
+        }}>
+          <span>{isFlatPhoto ? '' : '🖱 Drag to look around'}</span>
           <span>Captured {new Date(activeUpload.uploaded_at).toLocaleDateString()}</span>
         </div>
       )}
@@ -272,15 +352,17 @@ export default function PanoramaViewer() {
   const [split, setSplit] = useState(false)
 
   // Two independent cascades always exist; only the right one is shown when split is off.
-  const left  = useImageCascade(selectedProject?.id)
+  const left = useImageCascade(selectedProject?.id)
   const right = useImageCascade(selectedProject?.id)
 
   const toggleSplit = useCallback(() => setSplit(s => !s), [])
 
   return (
     <div style={{ padding: 28, maxWidth: 1800 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexWrap: 'wrap', gap: 12, marginBottom: 20
+      }}>
         <div>
           <h1 style={{ fontSize: 22, fontFamily: 'Space Grotesk', fontWeight: 700, marginBottom: 4 }}>
             Site Photo Viewer
