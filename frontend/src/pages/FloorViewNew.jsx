@@ -40,6 +40,24 @@ function toLabel(key) {
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
+// ─── KPI grid coloring (Floor tile + Room ID tiles): 3 simple bands ─────────
+const KPI_BANDS = [
+  { max: 40,  label: '< 40%',   bg: '#FDEBD3', border: '#F5C083', text: '#92400E' }, // light orange
+  { max: 75,  label: '40–75%',  bg: '#FEF6C7', border: '#F3DE72', text: '#92730B' }, // yellow
+  { max: 101, label: '> 75%',   bg: '#DCFCE7', border: '#86EFAC', text: '#15803D' }, // green
+]
+function kpiColor(pct) {
+  if (pct === null || pct === undefined) return KPI_BANDS[0]
+  return KPI_BANDS.find(b => pct < b.max) || KPI_BANDS[KPI_BANDS.length - 1]
+}
+// Vivid bar-fill color (the band's muted `text` color reads as mustard on a progress bar)
+function barColor(pct) {
+  if (pct === null || pct === undefined) return '#F97316'
+  if (pct < 40) return '#F97316'   // orange
+  if (pct < 75) return '#F5A623'  // amber/gold
+  return '#22C55E'                 // green
+}
+
 // Pick the history entry that was current as of `dateKey` (or the latest if dateKey is null)
 function historyAt(history, dateKey) {
   if (!history.length) return null
@@ -207,7 +225,6 @@ export default function FloorViewNew() {
 
   const focusedEntry = selectedEntry?.rooms.find(r => r.room.id === focusedRoomId) || null
   const focusedValue = focusedEntry ? roomValueFor(focusedEntry.room, focusedEntry.history, 'Overall') : null
-  const focusedAt    = focusedEntry ? historyAt(focusedEntry.history, selectedDate) : null
 
   if (!selectedProject) {
     return <div className="card"><Empty message="No active project" hint="Select a project from the sidebar" /></div>
@@ -236,21 +253,20 @@ export default function FloorViewNew() {
       <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16 }}>
         {/* ── Left: tower/project summary + categories ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ background: '#111827', borderRadius: 12, padding: 16, color: '#fff' }}>
-            <div style={{ fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 15 }}>
-              {selectedProject.name}
+          <div className="card">
+            <div style={{ fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 15, color: 'var(--text-1)' }}>
+              SnagVision AI Progress
             </div>
-            <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>SnagVision AI Progress Agent</div>
             <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-              <div style={{ flex: 1, background: 'rgba(255,255,255,.06)', borderRadius: 8, padding: '8px 10px' }}>
-                <div style={{ fontSize: 10, color: '#9CA3AF' }}>OVERALL PROGRESS</div>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>
+              <div style={{ flex: 1, background: 'var(--bg-hover)', borderRadius: 8, padding: '8px 10px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-3)' }}>OVERALL PROGRESS</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>
                   {floorAvg === null ? '—' : `${Math.round(floorAvg)}%`}
                 </div>
               </div>
-              <div style={{ flex: 1, background: 'rgba(255,255,255,.06)', borderRadius: 8, padding: '8px 10px' }}>
-                <div style={{ fontSize: 10, color: '#9CA3AF' }}>ROOMS CAPTURED</div>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>{capturedRooms}/{totalRooms}</div>
+              <div style={{ flex: 1, background: 'var(--bg-hover)', borderRadius: 8, padding: '8px 10px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-3)' }}>ROOMS CAPTURED</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>{capturedRooms}/{totalRooms}</div>
               </div>
             </div>
           </div>
@@ -307,14 +323,14 @@ export default function FloorViewNew() {
                   <div style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                     padding: '12px 8px', borderRadius: 10, position: 'relative',
-                    background: '#FDEBD3', border: '1.5px solid #F5C083',
+                    background: kpiColor(floorAvg).bg, border: `1.5px solid ${kpiColor(floorAvg).border}`,
                   }}>
                     {floorAlert && (
                       <span style={{ position: 'absolute', top: 6, right: 8, width: 7, height: 7,
                         borderRadius: '50%', background: '#EF4444' }} />
                     )}
-                    <span style={{ fontSize: 11, color: '#92400E' }}>Floor {selectedFloorObj?.floor_number}</span>
-                    <span style={{ fontSize: 18, fontWeight: 700, fontFamily: 'Space Grotesk', color: '#92400E' }}>
+                    <span style={{ fontSize: 11, color: kpiColor(floorAvg).text }}>Floor {selectedFloorObj?.floor_number}</span>
+                    <span style={{ fontSize: 18, fontWeight: 700, fontFamily: 'Space Grotesk', color: kpiColor(floorAvg).text }}>
                       {floorAvg === null ? '—' : `${Math.round(floorAvg)}%`}
                     </span>
                   </div>
@@ -322,7 +338,7 @@ export default function FloorViewNew() {
                   {units.map(entry => {
                     const val   = unitValue(entry, selectedCategory)
                     const delta = selectedCategory === 'Overall' ? unitDelta(entry) : null
-                    const band  = bandFor(val)
+                    const band  = kpiColor(val)
                     const isActive = selectedUnitId === entry.unit.id
                     return (
                       <button key={entry.unit.id} onClick={() => setSelectedUnitId(entry.unit.id)} style={{
@@ -347,7 +363,7 @@ export default function FloorViewNew() {
 
                 {/* Legend */}
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', borderTop: '1px solid var(--border-dim)', paddingTop: 10 }}>
-                  {BANDS.map(b => (
+                  {KPI_BANDS.map(b => (
                     <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-3)' }}>
                       <span style={{ width: 10, height: 10, borderRadius: 3, background: b.bg, border: `1px solid ${b.border}` }} />
                       {b.label}
@@ -397,12 +413,12 @@ export default function FloorViewNew() {
                         }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                             <strong style={{ fontSize: 13 }}>{room.name}</strong>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: bandFor(pct).text }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#111111' }}>
                               {pct === null ? '—' : `${Math.round(pct)}%`}
                             </span>
                           </div>
                           <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
-                            <div style={{ height: '100%', width: `${pct || 0}%`, background: bandFor(pct).text, borderRadius: 2 }} />
+                            <div style={{ height: '100%', width: `${pct || 0}%`, background: barColor(pct), borderRadius: 2 }} />
                           </div>
                           {!selectedDate && latestNotes && (
                             <div style={{ display: 'flex', gap: 6, fontSize: 11, color: 'var(--text-2)', marginBottom: 4 }}>
@@ -479,34 +495,6 @@ export default function FloorViewNew() {
                       [ {pendingComponents(focusedEntry.room, focusedEntry.history).map(t => `"${t}"`).join(', ') || '—'} ]
                     </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Category deep dive for this room */}
-              <div className="card" style={{ gridColumn: '1 / -1' }}>
-                <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
-                  Category progress — {focusedEntry.room.name}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-                  {Object.entries(focusedAt?.components || {}).map(([key, val]) => {
-                    const status = val === null || val === undefined ? 'Not started'
-                      : val >= 95 ? 'Completed' : val > 0 ? 'Partially complete' : 'Not started'
-                    return (
-                      <div key={key} style={{ border: '1px solid var(--border-dim)', borderLeft: '3px solid var(--amber)',
-                        borderRadius: 8, padding: 10 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                          <strong style={{ fontSize: 12 }}>{toLabel(key)}</strong>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--amber)' }}>
-                            {typeof val === 'number' ? Math.round(val) : 0}%
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 11, fontStyle: 'italic', color: 'var(--text-3)' }}>{status}</div>
-                      </div>
-                    )
-                  })}
-                  {Object.keys(focusedAt?.components || {}).length === 0 && (
-                    <div style={{ fontSize: 12, color: 'var(--text-3)' }}>No category data for this date</div>
-                  )}
                 </div>
               </div>
             </div>
