@@ -2,7 +2,7 @@ import asyncio
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from models import get_db
-from models.database import MediaUpload, Room, UploadStatus
+from models.database import MediaUpload, Room, UploadStatus, Project
 from schemas.models import UploadOut
 from services.gcs_service import upload_media
 from services.gemini_service import analyse_image, compute_change_flag
@@ -62,7 +62,7 @@ async def upload_file(
     # Trigger AI in background so upload response is instant
     if "image" in mime:
         background_tasks.add_task(
-            _run_analysis, upload.id, room.name, contents, mime, db
+            _run_analysis, upload.id, room.name, contents, mime, db, project_id
         )
 
     return upload
@@ -74,6 +74,7 @@ async def _run_analysis(
     image_bytes: bytes,
     mime: str,
     db: Session,
+    project_id: str = None,
 ):
     """Background task: call Gemini, store result, rollup progress."""
     upload = db.query(MediaUpload).get(upload_id)
@@ -81,9 +82,23 @@ async def _run_analysis(
         return
 
     try:
+        # Project's custom Activity Plan (if set) drives which categories Gemini
+        # scores — falls back to the default furniture-category list when unset.
+        activity_names = None
+        if project_id:
+            project = db.query(Project).get(project_id)
+            if project and project.activity_plan:
+                # activity_plan entries are {name, target_date} dicts (older
+                # projects may still have plain strings) — only the name
+                # feeds the Gemini prompt.
+                activity_names = [
+                    a["name"] if isinstance(a, dict) else a
+                    for a in project.activity_plan
+                ]
+
         # 1. Gemini se response lijiye
         raw_data, overall_pct, notes = await analyse_image(
-            image_bytes, mime, room_name
+            image_bytes, mime, room_name, activity_names=activity_names
         )
 
         # 2. components mein se overall_pct aur notes ko alag kar lijiye 

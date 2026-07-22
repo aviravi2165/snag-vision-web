@@ -4,7 +4,7 @@ from models import get_db
 from models.database import Project, Floor, Unit, Room, Spot, UserRole
 from schemas.models import (
     ProjectCreate, ProjectOut, FloorCreate, FloorOut,
-    UnitCreate, RoomCreate, RoomOut, SpotCreate, SpotOut,
+    UnitCreate, RoomCreate, RoomOut, SpotCreate, SpotOut, ActivityPlanIn, ActivityItem,
 )
 from services.progress_service import build_dashboard
 from services.gcs_service import upload_media
@@ -59,6 +59,39 @@ def delete_project(
 @router.get("/{project_id}/dashboard")
 def get_dashboard(project_id: str, db: Session = Depends(get_db)):
     return build_dashboard(project_id, db)
+
+
+# ── Activity Plan (drives the Executive dashboard + the AI prompt) ──────────
+
+def _normalize_activity_plan(plan):
+    """Older projects stored activity_plan as a plain list of name strings —
+    upgrade those to the {name, target_date} shape on read so the frontend
+    never has to handle both forms."""
+    out = []
+    for item in (plan or []):
+        if isinstance(item, str):
+            out.append({"name": item, "target_date": None})
+        else:
+            out.append({"name": item.get("name"), "target_date": item.get("target_date")})
+    return out
+
+
+@router.get("/{project_id}/activities", response_model=List[ActivityItem])
+def get_activities(project_id: str, db: Session = Depends(get_db)):
+    p = db.query(Project).get(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+    return _normalize_activity_plan(p.activity_plan)
+
+
+@router.put("/{project_id}/activities", response_model=List[ActivityItem])
+def set_activities(project_id: str, data: ActivityPlanIn, db: Session = Depends(get_db)):
+    p = db.query(Project).get(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+    p.activity_plan = [a.dict() for a in data.activities]
+    db.commit()
+    return _normalize_activity_plan(p.activity_plan)
 
 
 # ── Floors ────────────────────────────────────────────────────────────────────
