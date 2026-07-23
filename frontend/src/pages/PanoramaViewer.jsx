@@ -1,13 +1,16 @@
 /**
  * PanoramaViewer.jsx — Site Photo Viewer
  *
- * Cascading filters: Floor → Room ID (Unit) → Room Name (Area) → Date.
- * Every dropdown is fetched live from the backend (Create Project is the source of
- * truth for Floor/Room ID/Room Name; MediaUpload rows — created permanently, with an
- * automatic timestamp, whenever a photo is captured via Site Capture — are the source
- * of truth for the Date list and the image itself).
+ * Cascading filters: Floor → Room ID (Unit) → Spot (Room/Area, e.g. bathroom,
+ * bedroom) → Date. "Room ID" is the Unit created under Create Project (a
+ * physical room, e.g. "Room 101"); "Spot" is the specific area/capture point
+ * within it. Every dropdown is fetched live from the backend (Create Project
+ * is the source of truth for Floor/Room ID/Spot; MediaUpload rows — created
+ * permanently, with an automatic timestamp, whenever a photo is captured via
+ * Site Capture or the mobile app — are the source of truth for the Date list
+ * and the image itself).
  *
- * The image only renders once Floor, Room ID, Room Name and Date are all selected.
+ * The image only renders once Floor, Room ID, Spot and Date are all selected.
  * "Split Comparison" duplicates the filter panel so two photos can be viewed side by side,
  * each with fully independent selections.
  */
@@ -163,6 +166,7 @@ function useImageCascade(projectId) {
   const [uploads, setUploads] = useState([])
   const [dateKey, setDateKey] = useState('')
   const [loading, setLoading] = useState(false)
+  const [unitsLoading, setUnitsLoading] = useState(false)
 
   // Floor list — always the latest from Create Project
   useEffect(() => {
@@ -175,18 +179,42 @@ function useImageCascade(projectId) {
   // hotel-flow Units (getUnits) and mobile-flow flat Rooms (getFloorRooms,
   // Room.floor_id set directly, no Unit). Each option is tagged with `type`
   // so the next two steps know which endpoint to call.
+  //
+  // Only kept if it actually has a photo somewhere underneath it -- an
+  // empty Unit/Room led straight to "no photos" with nothing to explain
+  // why, which is exactly what caused confusion here. This costs an extra
+  // round of upload-count checks per candidate, acceptable at this app's
+  // scale (a handful of units/rooms per floor).
   useEffect(() => {
     setUnits([]); setUnitId('')
     if (!floorId) return
+    let cancelled = false
+    setUnitsLoading(true)
+
+    const hasPhotos = (roomId) =>
+      getRoomUploads(roomId)
+        .then(({ data }) => data.some(x => x.media_type === 'photo' && x.status !== 'failed'))
+        .catch(() => false)
+
     Promise.all([
       getUnits(floorId).catch(() => ({ data: [] })),
       getFloorRooms(floorId).catch(() => ({ data: [] })),
-    ]).then(([u, r]) => {
-      setUnits([
-        ...u.data.map(x => ({ id: x.id, label: x.unit_number, type: 'unit' })),
-        ...r.data.map(x => ({ id: x.id, label: `📍 ${x.name} (site capture)`, type: 'room' })),
-      ])
+    ]).then(async ([u, r]) => {
+      const unitEntries = await Promise.all(u.data.map(async (unit) => {
+        const subRooms = await getRooms(unit.id).then((res) => res.data).catch(() => [])
+        const anyPhoto = (await Promise.all(subRooms.map((sr) => hasPhotos(sr.id)))).some(Boolean)
+        return anyPhoto ? { id: unit.id, label: unit.unit_number, type: 'unit' } : null
+      }))
+      const roomEntries = await Promise.all(r.data.map(async (room) => (
+        (await hasPhotos(room.id)) ? { id: room.id, label: `📍 ${room.name} (site capture)`, type: 'room' } : null
+      )))
+      if (!cancelled) {
+        setUnits([...unitEntries, ...roomEntries].filter(Boolean))
+        setUnitsLoading(false)
+      }
     })
+
+    return () => { cancelled = true }
   }, [floorId])
 
   // Room Name for the chosen Room ID — sub-Rooms if a hotel Unit was picked,
@@ -251,7 +279,7 @@ function useImageCascade(projectId) {
 
   return {
     floors, floorId, setFloorId,
-    units, unitId, setUnitId,
+    units, unitId, setUnitId, unitsLoading,
     rooms, roomId, setRoomId,
     dateOptions, dateKey, setDateKey,
     activeUpload, loading,
@@ -259,7 +287,7 @@ function useImageCascade(projectId) {
 }
 
 function FilterPanel({ title, cascade, viewerHeight = 560 }) {
-  const { floors, floorId, setFloorId, units, unitId, setUnitId,
+  const { floors, floorId, setFloorId, units, unitId, setUnitId, unitsLoading,
     rooms, roomId, setRoomId, dateOptions, dateKey, setDateKey,
     activeUpload, loading } = cascade
 
@@ -291,15 +319,17 @@ function FilterPanel({ title, cascade, viewerHeight = 560 }) {
         </div>
         <div>
           <label className="label">Room ID</label>
-          <select value={unitId} onChange={e => setUnitId(e.target.value)} disabled={!units.length}>
-            <option value="">{!floorId ? 'Select floor first' : units.length ? 'Select Room ID…' : 'No Room IDs'}</option>
+          <select value={unitId} onChange={e => setUnitId(e.target.value)} disabled={!units.length || unitsLoading}>
+            <option value="">
+              {!floorId ? 'Select floor first' : unitsLoading ? 'Loading…' : units.length ? 'Select Room ID…' : 'No rooms with photos yet'}
+            </option>
             {units.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
           </select>
         </div>
         <div>
-          <label className="label">Room Name</label>
+          <label className="label">Spot</label>
           <select value={roomId} onChange={e => setRoomId(e.target.value)} disabled={!rooms.length}>
-            <option value="">{!unitId ? 'Select Room ID first' : rooms.length ? 'Select room…' : 'No rooms'}</option>
+            <option value="">{!unitId ? 'Select Room ID first' : rooms.length ? 'Select spot…' : 'No spots'}</option>
             {rooms.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
         </div>
@@ -330,7 +360,7 @@ function FilterPanel({ title, cascade, viewerHeight = 560 }) {
           )
         ) : (
           <Empty message="No image to show"
-            hint="Select Floor, Room ID, Room Name and Date to view a photo" />
+            hint="Select Floor, Room ID, Spot and Date to view a photo" />
         )}
       </div>
 
@@ -355,6 +385,26 @@ export default function PanoramaViewer() {
   const left = useImageCascade(selectedProject?.id)
   const right = useImageCascade(selectedProject?.id)
 
+  // Split comparison exists to compare the same location across two dates,
+  // so the right panel's Floor/Room ID/Room Name mirror the left panel
+  // whenever the left panel's selection changes -- saving a re-pick of the
+  // same location twice. Date is deliberately left independent per panel.
+  // Every dropdown on the right stays a normal, freely-editable control --
+  // this only sets a starting point, it never disables anything.
+  useEffect(() => {
+    if (split) right.setFloorId(left.floorId)
+  }, [split, left.floorId])
+
+  useEffect(() => {
+    if (!split || !left.unitId) return
+    if (right.units.some(u => u.id === left.unitId)) right.setUnitId(left.unitId)
+  }, [split, left.unitId, right.units])
+
+  useEffect(() => {
+    if (!split || !left.roomId) return
+    if (right.rooms.some(r => r.id === left.roomId)) right.setRoomId(left.roomId)
+  }, [split, left.roomId, right.rooms])
+
   const toggleSplit = useCallback(() => setSplit(s => !s), [])
 
   return (
@@ -368,7 +418,7 @@ export default function PanoramaViewer() {
             Site Photo Viewer
           </h1>
           <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
-            Filter by Floor → Room ID → Room Name → Date to view a captured photo.
+            Filter by Floor → Room ID → Spot → Date to view a captured photo.
           </p>
         </div>
         <button className="btn-ghost" onClick={toggleSplit}
