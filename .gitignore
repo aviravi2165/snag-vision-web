@@ -12,7 +12,7 @@ backend/.env
 backend/*.db
 
 # Uploads
-backend/uploads/
+# backend/uploads/
 
 # Node
 frontend/node_modules/
