@@ -12,13 +12,10 @@ backend/.env
 backend/*.db
 
 # Uploads
-backend/uploads/
-./backend/uploads/
-backend/uploads-1/
+# backend/uploads/
 
 # Node
 frontend/node_modules/
-./frontend/node_modules/
 
 # Build files
 frontend/dist/
