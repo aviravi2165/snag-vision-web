@@ -53,6 +53,15 @@ class ProjectOut(BaseModel):
         from_attributes = True
 
 
+class ActivityItem(BaseModel):
+    name: str
+    target_date: Optional[str] = None  # ISO date string (YYYY-MM-DD), the planned completion date
+
+
+class ActivityPlanIn(BaseModel):
+    activities: List[ActivityItem]
+
+
 # --- Floor / Unit / Room ---
 class FloorCreate(BaseModel):
     floor_number: int

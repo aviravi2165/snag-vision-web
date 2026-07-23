@@ -58,6 +58,11 @@ class Project(Base):
     # Lightweight floor/room list for the Site (Layout Setup) subsystem — [{number, rooms:[{id,name}]}].
     # Named site_floors (not "floors") because that name is already the Floor relationship above.
     site_floors = Column(JSON, nullable=True)
+    # Custom Activity Plan for the Executive dashboard — list of activity name strings
+    # (e.g. ["Commercial Tiles", "Wall Panelling", ...]). When set, Gemini is prompted
+    # to score completion per activity instead of the default furniture-category list —
+    # see services/gemini_service.py:build_prompt().
+    activity_plan = Column(JSON, nullable=True)
 
 class Floor(Base):
     __tablename__ = "floors"

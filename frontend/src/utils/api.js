@@ -8,6 +8,21 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// Missing/expired token → the backend answers every request with 401. Instead of
+// silently failing (blank page, console full of 401s), drop the stale session and
+// send the user back to /login so they can sign in again.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && window.location.pathname !== '/login') {
+      localStorage.removeItem('siteiq_token')
+      localStorage.removeItem('siteiq_user')
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  }
+)
+
 export default api
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
@@ -29,6 +44,11 @@ export const getRooms = (unitId) => api.get(`/projects/units/${unitId}/rooms`)
 // spot-capture flow. Spots are the finest-grained level under those rooms.
 export const getFloorRooms = (floorId) => api.get(`/projects/floors/${floorId}/rooms`)
 export const getRoomSpots = (roomId) => api.get(`/projects/rooms/${roomId}/spots`)
+
+// ─── Activity Plan (Executive dashboard + AI prompt categories) ─────────────
+export const getActivities = (projectId) => api.get(`/projects/${projectId}/activities`)
+export const setActivities = (projectId, activities) =>
+  api.put(`/projects/${projectId}/activities`, { activities })
 
 // ─── Uploads & Analysis ─────────────────────────────────────────────────────
 export const uploadMedia = (formData) =>

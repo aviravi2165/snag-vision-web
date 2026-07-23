@@ -1,13 +1,14 @@
 import base64
 import io
 import json
+import re
 from PIL import Image
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from google import genai
 from google.genai import types
 from config import settings
 import asyncio
-import os 
+import os
 from dotenv import load_dotenv
 
 
@@ -28,43 +29,61 @@ def _get_client():
         _client = genai.Client(api_key=api_key)
     return _client
 
-ANALYSIS_PROMPT = """
-You are an expert furniture manufacturing and quality inspector.
-Analyse the provided image of a furniture item under construction/installation.
-Estimate the completion percentage for each component based on visible evidence.
+# Fallback component list used only when a project has no custom Activity Plan set
+# (Projects page → Activity Plan). Kept for backward compatibility with existing
+# projects/analyses that already used these keys.
+DEFAULT_ACTIVITIES = [
+    "design_approval", "carpentry_frame", "polishing_painting",
+    "upholstery_work", "hardware_fitting", "packaging_delivery", "site_installation",
+]
 
-Components to evaluate:
-- design_approval
-- carpentry_frame
-- polishing_painting
-- upholstery_work
-- hardware_fitting
-- packaging_delivery
-- site_installation
+
+def slugify_activity(name: str) -> str:
+    """'Commercial Tiles' -> 'commercial_tiles' — used as the JSON key so an
+    Activity Plan of free-text names still round-trips through the DB's
+    dict-of-numbers `components` column the rest of the app already expects."""
+    slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+    return slug or "activity"
+
+
+def build_prompt(activity_names: Optional[List[str]] = None) -> str:
+    """Builds the Gemini prompt from a project's Activity Plan (or the default
+    furniture-category list if none is set). The JSON schema keys are the
+    slugified activity names, so the rest of the pipeline (components dict,
+    Executive dashboard, radar charts) works unchanged regardless of which
+    activity names a given project uses."""
+    names = activity_names or DEFAULT_ACTIVITIES
+    keys = [slugify_activity(n) for n in names]
+    schema_lines = ",\n".join(f'  "{k}": <0-100 or null>' for k in keys)
+    bullet_lines = "\n".join(f"- {n}" for n in names)
+    return f"""
+You are an expert construction/interior-fit-out progress inspector.
+Analyse the provided site photo. Estimate the completion percentage for each
+activity below, based only on visible evidence in the image.
+
+Activities to evaluate:
+{bullet_lines}
 
 Evaluation Rules:
 - clearly visible and 100% done: 100
-- partially done: estimate 10–90
-- minimal work: 10–30
-- not visible/not applicable: null
+- partially done: estimate 10-90
+- minimal work: 10-30
+- not visible / not applicable in this photo: null
 
 Respond ONLY with a valid JSON object matching this schema:
-{
-  "design_approval": 100,
-  "carpentry_frame": 80,
-  "polishing_painting": null,
-  "upholstery_work": null,
-  "hardware_fitting": null,
-  "packaging_delivery": null,
-  "site_installation": null,
-  "overall_pct": 90,
+{{
+{schema_lines},
+  "overall_pct": <0-100>,
   "notes": "string description"
-}
+}}
 """
 
 # 1. 'async def' lagaya taaki 'await' kaam kare.
 # 2. '*args' aur '**kwargs' lagaya taaki uploads.py jo extra 2 arguments bhej raha hai usse error na aaye.
-async def analyse_image(image_b64, *args, **kwargs):
+# 3. 'activity_names' — jab project ka apna Activity Plan set ho, wahi categories
+#    Gemini ko bhejo (build_prompt), warna DEFAULT_ACTIVITIES pe fallback ho jata hai.
+async def analyse_image(image_b64, *args, activity_names: Optional[List[str]] = None, **kwargs):
+    prompt = build_prompt(activity_names)
     try:
         # Check agar input bytes hai
         if isinstance(image_b64, bytes):
@@ -95,7 +114,7 @@ async def analyse_image(image_b64, *args, **kwargs):
             try:
                 response = await _get_client().aio.models.generate_content(
                     model='gemini-2.5-flash', # Yahan check kar lena model name correct ho
-                    contents=[ANALYSIS_PROMPT, image],
+                    contents=[prompt, image],
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json"
                     )
