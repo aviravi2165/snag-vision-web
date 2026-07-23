@@ -124,6 +124,7 @@ class MobileSpotCreate(BaseModel):
 class UploadOut(BaseModel):
     id: str
     room_id: str
+    spot_id: Optional[str] = None
     gcs_url: str
     media_type: str
     file_name: str

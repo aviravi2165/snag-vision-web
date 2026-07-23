@@ -12,7 +12,7 @@ from jose import jwt, JWTError
 
 from config import settings
 from models import get_db
-from models.database import User, Project, Floor, Room, Spot, FloorPlan, Hotspot, MediaUpload, UploadStatus, UserRole
+from models.database import User, Project, Floor, Unit, Room, Spot, FloorPlan, Hotspot, MediaUpload, UploadStatus, UserRole
 from schemas.models import LoginIn, MobileSpotCreate, UserCreate
 from routers.auth import verify_pw, hash_pw, create_token, ALGORITHM
 from routers.uploads import _run_analysis
@@ -172,18 +172,40 @@ def mobile_structure(project_id: str, db: Session = Depends(get_db), user_id: st
         hotspots_by_num.setdefault(hs.floor_number, []).append(hs)
 
     def _fetch_rooms_and_spots():
-        rooms = db.query(Room).filter(Room.floor_id.in_(floor_ids)).all() if floor_ids else []
+        flat_rooms = db.query(Room).filter(Room.floor_id.in_(floor_ids)).all() if floor_ids else []
+        # A Unit-parented room (the web's traditional Unit -> Room hierarchy,
+        # e.g. Unit "A" -> Room "1") is otherwise invisible to the mobile app,
+        # which only ever knew about flat (Floor-parented) rooms -- yet
+        # Spot.room_id has no constraint on which "type" of room it points
+        # to, so a mobile spot can attach to one of these directly once it's
+        # exposed here. Qualify its name with the unit number (display_name)
+        # so it's distinguishable from flat rooms and same-named rooms under
+        # other units.
+        unit_rooms = (
+            db.query(Room, Unit.unit_number, Unit.floor_id)
+            .join(Unit, Room.unit_id == Unit.id)
+            .filter(Unit.floor_id.in_(floor_ids))
+            .all()
+        ) if floor_ids else []
+
         by_floor = {}
-        for r in rooms:
+        display_name = {}
+        for r in flat_rooms:
             by_floor.setdefault(r.floor_id, []).append(r)
-        room_ids = [r.id for r in rooms]
+            display_name[r.id] = r.name
+        for room, unit_number, unit_floor_id in unit_rooms:
+            by_floor.setdefault(unit_floor_id, []).append(room)
+            display_name[room.id] = f"{unit_number} · {room.name}"
+
+        all_rooms = flat_rooms + [r for r, _, _ in unit_rooms]
+        room_ids = [r.id for r in all_rooms]
         spots = db.query(Spot).filter(Spot.room_id.in_(room_ids)).order_by(Spot.sort_order).all() if room_ids else []
         by_room = {}
         for s in spots:
             by_room.setdefault(s.room_id, []).append(s)
-        return by_floor, by_room, spots
+        return by_floor, by_room, spots, display_name
 
-    rooms_by_floor, spots_by_room, all_spots = _fetch_rooms_and_spots()
+    rooms_by_floor, spots_by_room, all_spots, room_display_name = _fetch_rooms_and_spots()
 
     # Only floors with a live hotspot, or a previously hotspot-materialized
     # spot that might now need pruning, actually need _sync_hotspots_to_spots
@@ -199,7 +221,7 @@ def mobile_structure(project_id: str, db: Session = Depends(get_db), user_id: st
     if needs_sync:
         for floor in needs_sync:
             _sync_hotspots_to_spots(db, floor, hotspots_by_num.get(floor.floor_number, []))
-        rooms_by_floor, spots_by_room, all_spots = _fetch_rooms_and_spots()
+        rooms_by_floor, spots_by_room, all_spots, room_display_name = _fetch_rooms_and_spots()
 
     out = []
     for floor in floors:
@@ -219,7 +241,7 @@ def mobile_structure(project_id: str, db: Session = Depends(get_db), user_id: st
                 }
                 for s in spots_by_room.get(room.id, [])
             ]
-            rooms_out.append({"RoomId": room.id, "RoomName": room.name, "ColorHex": None, "spots": spots_out})
+            rooms_out.append({"RoomId": room.id, "RoomName": room_display_name.get(room.id, room.name), "ColorHex": None, "spots": spots_out})
         out.append({
             "FloorId": floor.id,
             "FloorName": floor.label or f"Floor {floor.floor_number}",

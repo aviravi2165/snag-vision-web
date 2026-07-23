@@ -13,7 +13,6 @@ backend/*.db
 
 # Uploads
 backend/uploads/
-backend/uploads-1/
 
 # Node
 frontend/node_modules/
@@ -27,6 +26,9 @@ Thumbs.db
 
 # VS Code
 .vscode/
+
+./claude
+claude
 
 # Logs
 *.log
