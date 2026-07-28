@@ -3,15 +3,15 @@ from typing import List
 import os 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql://postgres:password@localhost:5432/siteiq"
+    DATABASE_URL:str 
     gemini_api_key : str = os.getenv("gemini_api_key")
     GCS_BUCKET_NAME: str = "siteiq-media"
     GCS_PROJECT_ID: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = "./gcs-credentials.json"
-    CHROMA_HOST: str = "localhost"
-    CHROMA_PORT: int = 8001
+    CHROMA_HOST: str 
+    CHROMA_PORT: int
     SECRET_KEY: str = "changeme"
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    CORS_ORIGINS: str
 
     @property
     def cors_list(self) -> List[str]:
