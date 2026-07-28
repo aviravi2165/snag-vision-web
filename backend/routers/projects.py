@@ -1,13 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response
 from sqlalchemy.orm import Session
 from models import get_db
-from models.database import Project, Floor, Unit, Room, Spot, UserRole
+from models.database import (
+    Project, Floor, Unit, Room, Spot, UserRole,
+    Activity, ActivityMapping, UnmappedComponent, UnitActivityProgress, ActivityExcelFile,
+)
 from schemas.models import (
     ProjectCreate, ProjectOut, FloorCreate, FloorOut,
-    UnitCreate, RoomCreate, RoomOut, SpotCreate, SpotOut, ActivityPlanIn, ActivityItem,
+    UnitCreate, RoomCreate, RoomOut, SpotCreate, SpotOut,
+    ActivityPlanIn, ActivityItem, UnitMapIn, ActivityMappingIn,
 )
 from services.progress_service import build_dashboard
-from services.gcs_service import upload_media
+from services.gcs_service import upload_media, download_media
+from services.excel_service import parse_activity_excel, match_unit_columns
+from services.mapping_service import generate_ai_mapping
 from routers.auth import get_current_user, require_role
 from typing import List
 
@@ -61,19 +68,48 @@ def get_dashboard(project_id: str, db: Session = Depends(get_db)):
     return build_dashboard(project_id, db)
 
 
-# ── Activity Plan (drives the Executive dashboard + the AI prompt) ──────────
+# ── Activity Plan — now backed by the Activity table, driven by the uploaded
+# Activity Excel (routes further below); manual add/edit stays available as a
+# convenience for ad-hoc changes without a spreadsheet. ─────────────────────
 
-def _normalize_activity_plan(plan):
-    """Older projects stored activity_plan as a plain list of name strings —
-    upgrade those to the {name, target_date} shape on read so the frontend
-    never has to handle both forms."""
-    out = []
-    for item in (plan or []):
+def _project_units(project_id: str, db: Session) -> List[Unit]:
+    """Every Unit in a project — the Activity Excel's "Room" grain (e.g.
+    "A-101"). Not the `Room` model (Living/Bathroom Areas within a Unit) —
+    those stay Floor View's concern."""
+    units: List[Unit] = []
+    for f in db.query(Floor).filter(Floor.project_id == project_id).all():
+        units.extend(f.units)
+    return units
+
+
+def _ensure_activities_from_legacy_plan(project: Project, db: Session):
+    """One-time lazy migration: a project with the old JSON activity_plan but
+    no Activity rows yet gets them copied in, so already-configured projects
+    don't need re-setup."""
+    if db.query(Activity).filter(Activity.project_id == project.id).count() > 0:
+        return
+    if not project.activity_plan:
+        return
+    for i, item in enumerate(project.activity_plan):
         if isinstance(item, str):
-            out.append({"name": item, "target_date": None})
+            name, target_date = item, None
         else:
-            out.append({"name": item.get("name"), "target_date": item.get("target_date")})
-    return out
+            name, target_date = item.get("name"), item.get("target_date")
+        if not name:
+            continue
+        db.add(Activity(
+            project_id=project.id, name=name, sort_order=i,
+            end_date=datetime.fromisoformat(target_date) if target_date else None,
+        ))
+    db.commit()
+
+
+def _activity_out(a: Activity) -> ActivityItem:
+    return ActivityItem(
+        id=a.id, name=a.name,
+        start_date=a.start_date.date().isoformat() if a.start_date else None,
+        target_date=a.end_date.date().isoformat() if a.end_date else None,
+    )
 
 
 @router.get("/{project_id}/activities", response_model=List[ActivityItem])
@@ -81,7 +117,14 @@ def get_activities(project_id: str, db: Session = Depends(get_db)):
     p = db.query(Project).get(project_id)
     if not p:
         raise HTTPException(404, "Project not found")
-    return _normalize_activity_plan(p.activity_plan)
+    _ensure_activities_from_legacy_plan(p, db)
+    rows = (
+        db.query(Activity)
+        .filter(Activity.project_id == project_id)
+        .order_by(Activity.sort_order)
+        .all()
+    )
+    return [_activity_out(a) for a in rows]
 
 
 @router.put("/{project_id}/activities", response_model=List[ActivityItem])
@@ -89,9 +132,199 @@ def set_activities(project_id: str, data: ActivityPlanIn, db: Session = Depends(
     p = db.query(Project).get(project_id)
     if not p:
         raise HTTPException(404, "Project not found")
-    p.activity_plan = [a.dict() for a in data.activities]
+    # ORM delete (not a bulk query.delete()) so ActivityMapping/UnitActivityProgress
+    # rows for the replaced activities cascade properly instead of dangling.
+    for a in db.query(Activity).filter(Activity.project_id == project_id).all():
+        db.delete(a)
+    db.flush()
+    for i, item in enumerate(data.activities):
+        db.add(Activity(
+            project_id=project_id, name=item.name, sort_order=i,
+            end_date=datetime.fromisoformat(item.target_date) if item.target_date else None,
+        ))
+    p.activity_plan = None  # legacy JSON is no longer authoritative once Activity rows exist
     db.commit()
-    return _normalize_activity_plan(p.activity_plan)
+    return get_activities(project_id, db)
+
+
+# ── Activity Excel (master progress sheet) ───────────────────────────────────
+
+@router.post("/{project_id}/activity-excel")
+async def upload_activity_excel(project_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    p = db.query(Project).get(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+
+    contents = await file.read()
+    parsed = parse_activity_excel(contents)
+    if not parsed.activities:
+        raise HTTPException(400, "Couldn't find any activity rows in this file")
+
+    # Project-level file (not room-keyed) — sentinel room_id for the storage path scheme.
+    file_url, file_path = await upload_media(
+        contents, file.filename or "activity_plan.xlsx", project_id, "_activity_excel"
+    )
+
+    for a in db.query(Activity).filter(Activity.project_id == project_id).all():
+        db.delete(a)
+    db.flush()
+
+    activities: List[Activity] = []
+    for i, pa in enumerate(parsed.activities):
+        a = Activity(project_id=project_id, name=pa.name, start_date=pa.start_date,
+                      end_date=pa.end_date, sort_order=i)
+        db.add(a)
+        activities.append(a)
+    db.flush()
+
+    matched, unmatched = match_unit_columns(parsed.unit_columns, _project_units(project_id, db))
+
+    excel_file = db.query(ActivityExcelFile).filter(ActivityExcelFile.project_id == project_id).first()
+    if not excel_file:
+        excel_file = ActivityExcelFile(project_id=project_id)
+        db.add(excel_file)
+    excel_file.file_url = file_url
+    excel_file.file_path = file_path
+    excel_file.original_filename = file.filename
+    excel_file.sheet_name = parsed.sheet_name
+    excel_file.activity_col = parsed.activity_col
+    excel_file.start_date_col = parsed.start_date_col
+    excel_file.end_date_col = parsed.end_date_col
+    excel_file.unit_col_map = matched
+    excel_file.version = (excel_file.version or 0) + 1
+    db.commit()
+
+    await generate_ai_mapping(project_id, activities, db)
+
+    return {
+        "activities": [_activity_out(a) for a in activities],
+        "matched_rooms": len(matched),
+        "unmatched_columns": [{"col_index": c.col_index, "header": c.header} for c in unmatched],
+        "version": excel_file.version,
+    }
+
+
+@router.get("/{project_id}/activity-excel")
+def get_activity_excel(project_id: str, db: Session = Depends(get_db)):
+    ef = db.query(ActivityExcelFile).filter(ActivityExcelFile.project_id == project_id).first()
+    if not ef:
+        raise HTTPException(404, "No Activity Excel uploaded for this project")
+    return {
+        "file_url": ef.file_url, "original_filename": ef.original_filename,
+        "version": ef.version, "updated_at": ef.updated_at, "unit_col_map": ef.unit_col_map,
+    }
+
+
+@router.get("/{project_id}/activity-excel/download")
+async def download_activity_excel(project_id: str, db: Session = Depends(get_db)):
+    ef = db.query(ActivityExcelFile).filter(ActivityExcelFile.project_id == project_id).first()
+    if not ef:
+        raise HTTPException(404, "No Activity Excel uploaded for this project")
+    file_bytes = await download_media(ef.file_path)
+    return Response(
+        content=file_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{ef.original_filename or "activity_plan.xlsx"}"'},
+    )
+
+
+@router.put("/{project_id}/activity-excel/unit-map")
+def update_unit_map(project_id: str, data: List[UnitMapIn], db: Session = Depends(get_db)):
+    ef = db.query(ActivityExcelFile).filter(ActivityExcelFile.project_id == project_id).first()
+    if not ef:
+        raise HTTPException(404, "No Activity Excel uploaded for this project")
+    unit_map = dict(ef.unit_col_map or {})
+    for item in data:
+        unit_map[item.unit_id] = item.col_index
+    ef.unit_col_map = unit_map
+    db.commit()
+    return {"unit_col_map": ef.unit_col_map}
+
+
+# ── Component → Activity mapping ─────────────────────────────────────────────
+
+@router.get("/{project_id}/activity-mapping")
+def get_activity_mapping(project_id: str, db: Session = Depends(get_db)):
+    rows = db.query(ActivityMapping).filter(ActivityMapping.project_id == project_id).all()
+    return [
+        {"id": m.id, "component_key": m.component_key, "activity_id": m.activity_id,
+         "confidence": m.confidence, "source": m.source}
+        for m in rows
+    ]
+
+
+@router.put("/{project_id}/activity-mapping")
+def set_activity_mapping(project_id: str, data: List[ActivityMappingIn], db: Session = Depends(get_db)):
+    """Full replace of the MANUAL mapping rows only — AI-generated rows
+    (source="ai") are left untouched so a manual tweak doesn't wipe the rest
+    of the auto-proposed mapping."""
+    db.query(ActivityMapping).filter(
+        ActivityMapping.project_id == project_id, ActivityMapping.source == "manual"
+    ).delete()
+    for item in data:
+        db.add(ActivityMapping(
+            project_id=project_id, component_key=item.component_key,
+            activity_id=item.activity_id, confidence=item.confidence, source="manual",
+        ))
+    db.commit()
+    return get_activity_mapping(project_id, db)
+
+
+@router.get("/{project_id}/unmapped-components")
+def get_unmapped_components(project_id: str, db: Session = Depends(get_db)):
+    rows = (
+        db.query(UnmappedComponent)
+        .filter(UnmappedComponent.project_id == project_id)
+        .order_by(UnmappedComponent.sample_count.desc())
+        .all()
+    )
+    return [
+        {"component_key": r.component_key, "sample_count": r.sample_count,
+         "first_seen": r.first_seen, "last_seen": r.last_seen}
+        for r in rows
+    ]
+
+
+# ── Server-computed Unit × Activity progress matrix ──────────────────────────
+# "Unit" is the Activity Excel's "Room" grain (e.g. "A-101") — its value
+# already combined-averages that Unit's own Areas (Living/Bathroom); Area-
+# level breakdown stays on Floor View.
+
+@router.get("/{project_id}/progress")
+def get_progress_matrix(project_id: str, db: Session = Depends(get_db)):
+    p = db.query(Project).get(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+
+    activities = (
+        db.query(Activity).filter(Activity.project_id == project_id)
+        .order_by(Activity.sort_order).all()
+    )
+
+    locations = []
+    unit_ids: List[str] = []
+    for f in db.query(Floor).filter(Floor.project_id == project_id).order_by(Floor.floor_number).all():
+        for u in f.units:
+            locations.append({
+                "floor_id": f.id, "floor_number": f.floor_number,
+                "unit_id": u.id, "unit_number": u.unit_number,
+            })
+            unit_ids.append(u.id)
+
+    rows = (
+        db.query(UnitActivityProgress).filter(UnitActivityProgress.unit_id.in_(unit_ids)).all()
+        if unit_ids else []
+    )
+    cells = [
+        {
+            "activity_id": r.activity_id, "unit_id": r.unit_id,
+            "pct": r.progress_pct, "confidence": r.confidence_score,
+            "last_analysed": r.last_analysed,
+        }
+        for r in rows
+    ]
+
+    return {"activities": [_activity_out(a) for a in activities], "locations": locations, "cells": cells}
 
 
 # ── Floors ────────────────────────────────────────────────────────────────────

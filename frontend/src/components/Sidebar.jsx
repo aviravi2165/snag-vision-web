@@ -29,24 +29,13 @@ export default function Sidebar() {
       <div style={{
         padding: '18px 16px 14px',
         borderBottom: '1px solid #EBEAE6',
-        display: 'flex', alignItems: 'center', gap: 10,
       }}>
-        <div style={{
-          width: 30, height: 30, borderRadius: 8,
-          background: '#D32F2F',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 15, fontWeight: 800, color: '#FFFFFF',
-          fontFamily: 'Space Grotesk, sans-serif',
-        }}>S</div>
-        <div>
-          <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700,
-            fontSize: 15, color: '#111111', letterSpacing: '-0.03em' }}>
-            SnagVision
-          </div>
-          <div style={{ fontSize: 10, color: '#999999', letterSpacing: '.05em',
-            textTransform: 'uppercase' }}>
-            by IEVO
-          </div>
+        <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700,
+          fontSize: 15, color: '#111111', letterSpacing: '-0.03em' }}>
+          Vestigia
+        </div>
+        <div style={{ fontSize: 10, color: '#999999', letterSpacing: '.05em' }}>
+          By I.EVO
         </div>
       </div>
 

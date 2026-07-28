@@ -8,7 +8,7 @@ import {
 } from 'recharts'
 import DashboardNew from './DashboardNew'
 
-const NEW_DASHBOARD_KEY = 'snagvision_new_dashboard_enabled'
+const NEW_DASHBOARD_KEY = 'vestigia_new_dashboard_enabled'
 
 const weeklyMock = [
   { week: 'W1', pct: 30 }, { week: 'W2', pct: 45 },

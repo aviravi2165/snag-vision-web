@@ -1,5 +1,5 @@
 """
-Endpoints for the SnagVision mobile app only. Kept separate from the
+Endpoints for the VESTIGIA mobile app only. Kept separate from the
 web-facing routers (auth/projects/uploads) so their existing response shapes
 never change for the web frontend — mobile gets its own PascalCase shapes
 and its own auth/upload flow here, backed by the same underlying tables.

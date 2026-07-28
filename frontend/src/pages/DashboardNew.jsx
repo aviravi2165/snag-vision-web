@@ -1,43 +1,38 @@
 /**
  * DashboardNew.jsx — Activity-based Executive dashboard
  *
- * Reads a project's Activity Plan (Projects page → Activity Plan) and scores
- * every "Location" (a Floor + Room ID / Unit) against each activity, using
- * each Area's AI-analysis history (components keyed by the activity's slug —
- * see backend/services/gemini_service.py:slugify_activity). A location's
- * value for an activity is the average across its Areas' latest (or as-of a
- * selected date) value for that activity's key.
+ * Reads the project's Activity Excel-derived Activity Plan and its
+ * server-computed Unit × Activity progress matrix in a single call
+ * (GET /projects/{id}/progress) — the backend aggregates
+ * AIAnalysis.components (open-vocabulary, per services/gemini_service.py)
+ * through the project's component→activity mapping
+ * (services/mapping_service.py) into UnitActivityProgress rows, so this page
+ * no longer walks Floor→Unit→Room→history itself.
+ *
+ * Grain note: a "location" here is a Unit (e.g. "A-101" — the Activity
+ * Excel's actual "Room" column), whose value already combined-averages that
+ * Unit's own Areas (Living/Bathroom, the `Room` model). Area-level breakdown
+ * stays on the Floor View page — this dashboard never duplicates it.
+ *
+ * Trade-off worth knowing: UnitActivityProgress only stores the LATEST value
+ * per (Unit, activity) — there is no per-date history in the new pipeline
+ * (raw AIAnalysis.components are keyed by Gemini's own open vocabulary, not
+ * by activity, so a historical "as of" comparison can't be reconstructed
+ * client-side without re-implementing the mapping server does). The old
+ * pipeline's date picker / multi-point trend are dropped rather than faked.
  *
  * Nothing here is fabricated: if an activity has never been scored for a
  * location it shows as "Cannot Assess" (null), not a guessed number.
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import toast from 'react-hot-toast'
 import { useProject } from '../hooks/useProject'
-import {
-  getActivities, getFloors, getUnits, getRooms, getChangeDetection,
-} from '../utils/api'
+import { getProgressMatrix } from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell,
 } from 'recharts'
-
-function slugifyActivity(name) {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'activity'
-}
-
-// Pick the history entry current as of `dateKey` (or the latest if dateKey is null)
-function historyAt(history, dateKey) {
-  if (!history.length) return null
-  if (!dateKey) return history[history.length - 1]
-  let picked = null
-  for (const h of history) {
-    if (h.date.slice(0, 10) <= dateKey) picked = h
-  }
-  return picked
-}
 
 const COMPLETED_AT = 95   // >= this % counts as "Work Completed"
 
@@ -70,55 +65,28 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 export default function DashboardNew() {
   const { selectedProject } = useProject()
 
-  const [activityPlan, setActivityPlan] = useState([])     // [{ name, target_date }], from Activity Plan
-  const [locations,     setLocations]     = useState([])   // [{ floor, unit, rooms: [{room, history}] }]
-  const [loading,       setLoading]       = useState(false)
-
-  const activityNames = useMemo(() => activityPlan.map(a => a.name), [activityPlan])
-  const targetDateFor = useCallback(
-    (name) => activityPlan.find(a => a.name === name)?.target_date || null,
-    [activityPlan]
-  )
-  // Overdue: has a target date in the past and isn't fully complete yet
-  const isDelayed = useCallback((name, pct) => {
-    const target = targetDateFor(name)
-    if (!target) return false
-    return target < todayIso() && (pct === null || pct < COMPLETED_AT)
-  }, [targetDateFor])
+  const [activities, setActivities] = useState([])   // [{id, name, start_date, target_date}]
+  const [locations,  setLocations]  = useState([])    // [{floor_id, floor_number, unit_id, unit_number}]
+  const [cells,      setCells]      = useState([])    // [{activity_id, unit_id, pct, confidence, last_analysed}]
+  const [loading,    setLoading]    = useState(false)
 
   const [selectedFloor, setSelectedFloor] = useState('all')
-  const [selectedDate,  setSelectedDate]  = useState(null)  // null = latest
   const [showActivityModal, setShowActivityModal] = useState(false)
 
-  // ── Load Activity Plan + full Floor→Unit→Room→history tree for this project ──
+  // ── Load the pre-aggregated matrix — one call instead of the old
+  // Floor→Unit→Room→getChangeDetection waterfall. ──────────────────────────
   useEffect(() => {
     let cancelled = false
     async function load() {
-      setLocations([]); setActivityPlan([])
+      setActivities([]); setLocations([]); setCells([])
       if (!selectedProject) return
       setLoading(true)
       try {
-        const [{ data: activities }, { data: floors }] = await Promise.all([
-          getActivities(selectedProject.id),
-          getFloors(selectedProject.id),
-        ])
+        const { data } = await getProgressMatrix(selectedProject.id)
         if (cancelled) return
-        // Older projects may still return plain name strings — normalize.
-        setActivityPlan(activities.map(a => (typeof a === 'string' ? { name: a, target_date: null } : a)))
-
-        const locs = []
-        for (const floor of floors) {
-          const { data: units } = await getUnits(floor.id)
-          for (const unit of units) {
-            const { data: rooms } = await getRooms(unit.id)
-            const roomsWithHistory = await Promise.all(rooms.map(async room => {
-              const history = await getChangeDetection(room.id).then(r => r.data).catch(() => [])
-              return { room, history }
-            }))
-            locs.push({ floor, unit, rooms: roomsWithHistory })
-          }
-        }
-        if (!cancelled) setLocations(locs)
+        setActivities(data.activities)
+        setLocations(data.locations)
+        setCells(data.cells)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -127,35 +95,49 @@ export default function DashboardNew() {
     return () => { cancelled = true }
   }, [selectedProject])
 
+  const activityNames = useMemo(() => activities.map(a => a.name), [activities])
+  const nameToId = useMemo(() => {
+    const m = new Map()
+    activities.forEach(a => m.set(a.name, a.id))
+    return m
+  }, [activities])
+  const targetDateFor = useCallback(
+    (name) => activities.find(a => a.name === name)?.target_date || null,
+    [activities]
+  )
+  // Overdue: has a target date in the past and isn't fully complete yet
+  const isDelayed = useCallback((name, pct) => {
+    const target = targetDateFor(name)
+    if (!target) return false
+    return target < todayIso() && (pct === null || pct < COMPLETED_AT)
+  }, [targetDateFor])
+
   const floors = useMemo(() => {
     const seen = new Map()
-    locations.forEach(({ floor }) => seen.set(floor.id, floor))
+    locations.forEach(l => seen.set(l.floor_id, { id: l.floor_id, floor_number: l.floor_number }))
     return [...seen.values()].sort((a, b) => a.floor_number - b.floor_number)
   }, [locations])
 
-  const availableDates = useMemo(() => {
-    const set = new Set()
-    locations.forEach(({ rooms }) => rooms.forEach(({ history }) =>
-      history.forEach(h => set.add(h.date.slice(0, 10)))
-    ))
-    return [...set].sort((a, b) => b.localeCompare(a))
-  }, [locations])
-
   const filteredLocations = useMemo(() => (
-    selectedFloor === 'all' ? locations : locations.filter(l => l.floor.id === selectedFloor)
+    selectedFloor === 'all' ? locations : locations.filter(l => l.floor_id === selectedFloor)
   ), [locations, selectedFloor])
 
-  // value for one location + one activity, at the selected date — null if never assessed
-  const cellValue = useCallback((location, activityName) => {
-    const slug = slugifyActivity(activityName)
-    const vals = location.rooms
-      .map(({ history }) => historyAt(history, selectedDate)?.components?.[slug])
-      .filter(v => typeof v === 'number')
-    if (!vals.length) return null
-    return vals.reduce((a, b) => a + b, 0) / vals.length
-  }, [selectedDate])
+  const cellMap = useMemo(() => {
+    const m = new Map()
+    cells.forEach(c => m.set(`${c.activity_id}|${c.unit_id}`, c))
+    return m
+  }, [cells])
 
-  const locationLabel = (l) => `Floor ${l.floor.floor_number} | ${l.unit.unit_number}`
+  // value for one location (Unit) + one activity — the backend already
+  // combined-averages a Unit's own Areas (Living/Bathroom); this is a direct
+  // lookup, not a client-side re-aggregation. null if never assessed.
+  const cellValue = useCallback((location, activityName) => {
+    const activityId = nameToId.get(activityName)
+    if (!activityId) return null
+    return cellMap.get(`${activityId}|${location.unit_id}`)?.pct ?? null
+  }, [nameToId, cellMap])
+
+  const locationLabel = (l) => `Floor ${l.floor_number} | ${l.unit_number}`
 
   // ── Matrix: activityName -> [{ location, value }] ────────────────────────
   const matrix = useMemo(() => {
@@ -183,7 +165,7 @@ export default function DashboardNew() {
         else cannotAssess++
         if (typeof value === 'number') {
           numericValues.push(value)
-          processedLocations.add(location.unit.id)
+          processedLocations.add(location.unit_id)
         }
       })
     })
@@ -208,25 +190,6 @@ export default function DashboardNew() {
       }
     }).sort((a, b) => b.pct - a.pct)
   ), [activityNames, matrix, targetDateFor, isDelayed])
-
-  // ── Weekly progress trend — overall completion % as of each available date ──
-  const trendChart = useMemo(() => {
-    const asc = [...availableDates].sort((a, b) => a.localeCompare(b))
-    return asc.map(date => {
-      const vals = []
-      filteredLocations.forEach(loc => {
-        activityNames.forEach(a => {
-          const slug = slugifyActivity(a)
-          loc.rooms.forEach(({ history }) => {
-            const v = historyAt(history, date)?.components?.[slug]
-            if (typeof v === 'number') vals.push(v)
-          })
-        })
-      })
-      const avg = vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : null
-      return { date: new Date(date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), pct: avg === null ? null : Math.round(avg) }
-    })
-  }, [availableDates, filteredLocations, activityNames])
 
   // ── Completion by Location — per-location average across activities ─────
   const locationChart = useMemo(() => (
@@ -266,7 +229,7 @@ export default function DashboardNew() {
     return (
       <div className="card">
         <Empty message="No Activity Plan set for this project"
-          hint="Define one in Projects → Activity Plan to unlock this dashboard" />
+          hint="Upload an Activity Excel in Projects → Activity Plan to unlock this dashboard" />
       </div>
     )
   }
@@ -281,22 +244,12 @@ export default function DashboardNew() {
           </h1>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => toast('Coming soon')}>
-            📅 Compare dates
-          </button>
           <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowActivityModal(true)}>
             📋 Activity details
           </button>
           <button className="btn-ghost" style={{ fontSize: 12 }} onClick={downloadCsv}>
             ⬇ Download CSV
           </button>
-          <select value={selectedDate || ''} onChange={e => setSelectedDate(e.target.value || null)}
-            style={{ width: 'auto', fontSize: 12 }}>
-            <option value="">Latest</option>
-            {availableDates.map(d => (
-              <option key={d} value={d}>{new Date(d + 'T00:00:00').toLocaleDateString()}</option>
-            ))}
-          </select>
         </div>
       </div>
 
@@ -381,51 +334,27 @@ export default function DashboardNew() {
             </div>
           </div>
 
-          {/* Weekly progress trend + Floor-wise progress */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <div className="card">
-              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
-                Weekly progress trend
-              </div>
-              {trendChart.length === 0 ? <Empty message="No history yet" /> : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={trendChart}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
-                    <Tooltip content={<LightTooltip />} />
-                    <Line
-                      type="monotone" dataKey="pct"
-                      stroke="#D32F2F" strokeWidth={2.5}
-                      dot={{ r: 4, fill: '#D32F2F', stroke: '#FFFFFF', strokeWidth: 2 }}
-                      connectNulls activeDot={{ r: 6, fill: '#D32F2F' }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
+          {/* Completion by Location */}
+          <div className="card">
+            <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
+              Completion by Location
             </div>
-
-            <div className="card">
-              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
-                Completion by Location
-              </div>
-              {locationChart.length === 0 ? <Empty message="No locations yet" /> : (
-                <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-                  <div style={{ minWidth: Math.max(locationChart.length * 70, 100), height: 220 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={locationChart}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
-                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#666' }} axisLine={false} tickLine={false}
-                          angle={-40} textAnchor="end" height={70} interval={0} />
-                        <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
-                        <Tooltip content={<LightTooltip />} />
-                        <Bar dataKey="pct" fill="#2563EB" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+            {locationChart.length === 0 ? <Empty message="No locations yet" /> : (
+              <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+                <div style={{ minWidth: Math.max(locationChart.length * 70, 100), height: 260 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={locationChart}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#666' }} axisLine={false} tickLine={false}
+                        angle={-40} textAnchor="end" height={70} interval={0} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+                      <Tooltip content={<LightTooltip />} />
+                      <Bar dataKey="pct" fill="#2563EB" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -439,7 +368,6 @@ export default function DashboardNew() {
           onClose={() => setShowActivityModal(false)}
         />
       )}
-
     </div>
   )
 }
@@ -508,7 +436,7 @@ function ActivityDetailsModal({ activityNames, locations, cellValue, locationLab
             <tr>
               <th>Activity</th>
               <th>Target Date</th>
-              {locations.map(l => <th key={l.unit.id}>{locationLabel(l)}</th>)}
+              {locations.map(l => <th key={l.unit_id}>{locationLabel(l)}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -532,7 +460,7 @@ function ActivityDetailsModal({ activityNames, locations, cellValue, locationLab
                     const v = cellValue(l, a)
                     const status = statusFor(v)
                     return (
-                      <td key={l.unit.id}>
+                      <td key={l.unit_id}>
                         <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
                           background: STATUS_COLOR[status] + '22', color: STATUS_COLOR[status] }}>
                           {v === null ? 'N/A' : `${Math.round(v)}%`}
@@ -554,4 +482,3 @@ function ActivityDetailsModal({ activityNames, locations, cellValue, locationLab
     </ModalShell>
   )
 }
-

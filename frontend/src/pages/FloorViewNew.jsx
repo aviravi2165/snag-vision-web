@@ -255,7 +255,7 @@ export default function FloorViewNew() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="card">
             <div style={{ fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 15, color: 'var(--text-1)' }}>
-              SnagVision AI Progress
+              VESTIGIA AI Progress
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
               <div style={{ flex: 1, background: 'var(--bg-hover)', borderRadius: 8, padding: '8px 10px' }}>

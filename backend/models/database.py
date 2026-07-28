@@ -29,6 +29,13 @@ class UploadStatus(str, enum.Enum):
     failed = "failed"
 
 
+class AnalysisJobStatus(str, enum.Enum):
+    pending = "pending"
+    running = "running"
+    done = "done"
+    failed = "failed"
+
+
 class User(Base):
     __tablename__ = "users"
     id = Column(String(36), primary_key=True, default=gen_uuid)
@@ -58,11 +65,15 @@ class Project(Base):
     # Lightweight floor/room list for the Site (Layout Setup) subsystem — [{number, rooms:[{id,name}]}].
     # Named site_floors (not "floors") because that name is already the Floor relationship above.
     site_floors = Column(JSON, nullable=True)
-    # Custom Activity Plan for the Executive dashboard — list of activity name strings
-    # (e.g. ["Commercial Tiles", "Wall Panelling", ...]). When set, Gemini is prompted
-    # to score completion per activity instead of the default furniture-category list —
-    # see services/gemini_service.py:build_prompt().
+    # Legacy Activity Plan (list of {name, target_date} dicts, or plain strings on
+    # very old projects). Superseded by the `Activity` table below — kept read-only
+    # for backward compat; ensure_activities_from_legacy_plan() one-time-copies it
+    # into real Activity rows the first time a project's activities are requested.
     activity_plan = Column(JSON, nullable=True)
+    # Components scoring below this (0..1) are excluded from activity-progress
+    # aggregation — see services/mapping_service.py:recompute_unit_activity_progress().
+    confidence_threshold = Column(Float, nullable=True, default=0.5)
+    activities = relationship("Activity", back_populates="project", cascade="all, delete")
 
 class Floor(Base):
     __tablename__ = "floors"
@@ -123,6 +134,9 @@ class MediaUpload(Base):
     # the record that already landed instead of creating a duplicate.
     client_photo_id = Column(String(64), nullable=True, unique=True, index=True)
     spot_id = Column(String(36), ForeignKey("spots.id"), nullable=True)
+    # Which AnalysisJob processed this upload — set when a "Start AI Analysis" job
+    # picks it up. Null while status="pending" (uploaded, awaiting a job).
+    job_id = Column(String(36), ForeignKey("analysis_jobs.id"), nullable=True)
     room = relationship("Room", back_populates="uploads")
     supervisor = relationship("User", back_populates="uploads")
     analysis = relationship("AIAnalysis", back_populates="upload", uselist=False, cascade="all, delete")
@@ -204,3 +218,117 @@ class HotspotCapture(Base):
     hotspot_id = Column(String(36), ForeignKey("hotspots.id"), nullable=False)
     image_url = Column(String(500))
     captured_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dynamic Activity-Excel-driven progress tracking
+# (Activity Excel upload → AI component/activity mapping → per-room-per-activity
+# progress, kept in sync with the physical uploaded .xlsx). See
+# services/excel_service.py, services/mapping_service.py, services/job_worker.py.
+# ═══════════════════════════════════════════════════════════════════════════
+
+class Activity(Base):
+    """One row per activity, exactly as written in the project's Activity Excel —
+    name is never mutated/standardized. Replaces Project.activity_plan (JSON) as
+    the source of truth for new projects; existing JSON is migrated in lazily."""
+    __tablename__ = "activities"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    project = relationship("Project", back_populates="activities")
+    mappings = relationship("ActivityMapping", back_populates="activity", cascade="all, delete")
+    unit_progress = relationship("UnitActivityProgress", back_populates="activity", cascade="all, delete")
+
+
+class ActivityMapping(Base):
+    """component_key (Gemini's open-vocabulary detection, e.g. "marble") -> activity.
+    One project's mapping never affects another's — nothing here is hardcoded
+    across projects. source distinguishes an AI-proposed row from a manual edit."""
+    __tablename__ = "activity_mappings"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    component_key = Column(String(100), nullable=False)
+    activity_id = Column(String(36), ForeignKey("activities.id"), nullable=False)
+    confidence = Column(Float, default=1.0)
+    source = Column(String(20), default="ai")  # ai | manual
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    activity = relationship("Activity", back_populates="mappings")
+
+
+class UnmappedComponent(Base):
+    """A component Gemini detected with no ActivityMapping row yet for this
+    project — logged instead of silently dropped or guessed, so it can be
+    manually mapped later (or left out on purpose)."""
+    __tablename__ = "unmapped_components"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    component_key = Column(String(100), nullable=False)
+    sample_count = Column(Integer, default=1)
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow)
+
+
+class UnitActivityProgress(Base):
+    """The aggregated, queryable (Unit, Activity) progress cell — a Unit (e.g.
+    "A-101", the Room ID in the business sense — the Activity Excel's actual
+    column granularity) combined-averages across its own Areas (the Room
+    table — e.g. Living/Bathroom). Area-level breakdown stays Floor View's
+    job (Room.progress_pct via the existing room->unit->floor rollup); this
+    table is what the Activity Excel and the new Executive dashboard read
+    from. Computed from AIAnalysis.components via ActivityMapping, not
+    recomputed ad hoc per page load."""
+    __tablename__ = "unit_activity_progress"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    unit_id = Column(String(36), ForeignKey("units.id"), nullable=False)
+    activity_id = Column(String(36), ForeignKey("activities.id"), nullable=False)
+    progress_pct = Column(Float, nullable=True)   # null = "Cannot Assess"
+    confidence_score = Column(Float, nullable=True)
+    last_analysed = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    unit = relationship("Unit")
+    activity = relationship("Activity", back_populates="unit_progress")
+
+
+class ActivityExcelFile(Base):
+    """The project's uploaded master Activity Excel — kept in sync in place
+    (formulas/formatting/colors/validations/other sheets untouched) rather than
+    regenerated. One per project."""
+    __tablename__ = "activity_excel_files"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), unique=True, nullable=False)
+    file_url = Column(String(500))
+    file_path = Column(String(500))   # local/GCS path used for in-place openpyxl edits
+    original_filename = Column(String(255))
+    sheet_name = Column(String(100))
+    activity_col = Column(String(20))
+    start_date_col = Column(String(20), nullable=True)
+    end_date_col = Column(String(20), nullable=True)
+    # {unit_id: <Excel column index>} — a Unit is the Excel's "Room" grain
+    # (e.g. "A-101"); columns that didn't match a real Unit are omitted here
+    # until manually linked via PUT /activity-excel/unit-map.
+    unit_col_map = Column(JSON, nullable=True)
+    version = Column(Integer, default=1)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AnalysisJob(Base):
+    """One 'Start AI Analysis' run — snapshots every pending MediaUpload for the
+    project at creation time and processes them asynchronously via job_worker.py."""
+    __tablename__ = "analysis_jobs"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    status = Column(Enum(AnalysisJobStatus), default=AnalysisJobStatus.pending)
+    total_images = Column(Integer, default=0)
+    processed_images = Column(Integer, default=0)
+    failed_images = Column(Integer, default=0)
+    requested_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)

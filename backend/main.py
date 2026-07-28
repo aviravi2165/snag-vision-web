@@ -1,14 +1,16 @@
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from config import settings
 from models import init_db, SessionLocal
-from routers import auth, projects, uploads, analysis, mobile, site
+from routers import auth, projects, uploads, analysis, mobile, site, analysis_jobs
+from services.job_worker import job_worker_loop
 from seed import seed_demo_data
 
 app = FastAPI(
-    title="SnagVision — Interior Construction Monitoring API",
+    title="VESTIGIA — Interior Construction Monitoring API",
     version="1.0.0",
     description="AI-powered interior construction progress tracking for IEVO",
 )
@@ -27,6 +29,7 @@ app.include_router(uploads.router)
 app.include_router(analysis.router)
 app.include_router(mobile.router)
 app.include_router(site.router)
+app.include_router(analysis_jobs.router)
 
 # Serve local uploads (POC fallback when GCS not configured)
 uploads_dir = Path("./uploads")
@@ -35,15 +38,18 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()
     db = SessionLocal()
     try:
         seed_demo_data(db)
     finally:
         db.close()
+    # "Start AI Analysis" jobs are processed by this in-process polling worker —
+    # single-instance-safe; see services/job_worker.py.
+    asyncio.create_task(job_worker_loop())
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "SnagVision API"}
+    return {"status": "ok", "service": "VESTIGIA API"}

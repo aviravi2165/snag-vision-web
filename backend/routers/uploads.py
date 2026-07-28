@@ -1,5 +1,4 @@
-import asyncio
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
 from models import get_db
 from models.database import MediaUpload, Room, UploadStatus, Project
@@ -20,7 +19,6 @@ MAX_SIZE_MB = 20
 
 @router.post("", response_model=UploadOut, status_code=201)
 async def upload_file(
-    background_tasks: BackgroundTasks,
     room_id: str = Form(...),
     supervisor_id: str = Form(...),
     notes: str = Form(""),
@@ -45,6 +43,9 @@ async def upload_file(
 
     gcs_url, gcs_path = await upload_media(contents, file.filename, project_id, room_id)
 
+    # Upload only stores the file — status="pending" means "uploaded, awaiting
+    # a 'Start AI Analysis' job" (see POST /projects/{id}/analysis/start).
+    # Analysis no longer auto-triggers here; see services/job_worker.py.
     upload = MediaUpload(
         room_id=room_id,
         supervisor_id=supervisor_id,
@@ -53,17 +54,11 @@ async def upload_file(
         media_type=media_type_label,
         file_name=file.filename,
         notes=notes,
-        status=UploadStatus.analysing,
+        status=UploadStatus.pending,
     )
     db.add(upload)
     db.commit()
     db.refresh(upload)
-
-    # Trigger AI in background so upload response is instant
-    if "image" in mime:
-        background_tasks.add_task(
-            _run_analysis, upload.id, room.name, contents, mime, db, project_id
-        )
 
     return upload
 

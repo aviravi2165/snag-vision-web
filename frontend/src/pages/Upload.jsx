@@ -1,8 +1,13 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
 import toast from 'react-hot-toast'
-import { getProjects, getFloors, getUnits, getRooms, uploadMedia } from '../utils/api'
+import {
+  getProjects, getFloors, getUnits, getRooms, uploadMedia,
+  getPendingAnalysisCount, startAnalysis, getAnalysisJob,
+} from '../utils/api'
 import { useAuth } from '../hooks/useAuth'
+
+const JOB_POLL_MS = 2500
 
 export default function Upload() {
   const { user } = useAuth()
@@ -14,6 +19,55 @@ export default function Upload() {
   const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [results, setResults] = useState([])
+
+  // ── "Start AI Analysis" — upload only stores files; analysis is triggered
+  // explicitly here, then this job is polled until it finishes. ──────────────
+  const [pendingCount, setPendingCount] = useState(0)
+  const [job, setJob] = useState(null)
+  const [startingJob, setStartingJob] = useState(false)
+  const pollRef = useRef(null)
+
+  const refreshPendingCount = useCallback(() => {
+    if (!form.projectId) return
+    getPendingAnalysisCount(form.projectId).then(({ data }) => setPendingCount(data.pending_count)).catch(() => {})
+  }, [form.projectId])
+
+  useEffect(() => { refreshPendingCount() }, [refreshPendingCount])
+
+  useEffect(() => {
+    clearInterval(pollRef.current)
+    if (!job || !form.projectId || ['done', 'failed'].includes(job.status)) return
+    pollRef.current = setInterval(async () => {
+      try {
+        const { data } = await getAnalysisJob(form.projectId, job.id)
+        setJob(data)
+        if (['done', 'failed'].includes(data.status)) {
+          clearInterval(pollRef.current)
+          refreshPendingCount()
+          toast[data.status === 'done' ? 'success' : 'error'](
+            data.status === 'done' ? 'AI analysis complete' : 'AI analysis failed'
+          )
+        }
+      } catch {
+        clearInterval(pollRef.current)
+      }
+    }, JOB_POLL_MS)
+    return () => clearInterval(pollRef.current)
+  }, [job, form.projectId, refreshPendingCount])
+
+  const handleStartAnalysis = async () => {
+    if (!form.projectId) return
+    setStartingJob(true)
+    try {
+      const { data } = await startAnalysis(form.projectId)
+      setJob(data)
+      toast.success(`Analyzing ${data.total_images} image(s)…`)
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Nothing pending to analyze')
+    } finally {
+      setStartingJob(false)
+    }
+  }
 
   useEffect(() => {
     getProjects().then(({ data }) => { setProjects(data); if (data[0]) setForm(f => ({ ...f, projectId: data[0].id })) })
@@ -55,13 +109,17 @@ export default function Upload() {
       }
     }
     setResults(res); setFiles([]); setUploading(false)
+    refreshPendingCount()
   }
 
   return (
     <div style={{ padding: 28, maxWidth: 900 }}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 22, fontFamily: 'Space Grotesk', fontWeight: 700, marginBottom: 4 }}>Upload site media</h1>
-        <p style={{ fontSize: 13, color: 'var(--text-3)' }}>Photos and videos are analysed by Gemini 2.5 Flash automatically.</p>
+        <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
+          Photos and videos are stored immediately. Trigger AI analysis explicitly below when you're
+          ready — it runs in the background over every pending upload for the selected project.
+        </p>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -136,10 +194,57 @@ export default function Upload() {
           )}
 
           <button onClick={handleSubmit} className="btn-primary" disabled={uploading || !files.length} style={{ marginTop: 'auto' }}>
-            {uploading ? 'Uploading...' : `Upload & Analyse${files.length ? ` (${files.length})` : ''}`}
+            {uploading ? 'Uploading...' : `Upload${files.length ? ` (${files.length})` : ''}`}
           </button>
         </div>
       </div>
+
+      {/* Start AI Analysis — decoupled from upload; processes every pending
+          upload for the selected project via an async job. */}
+      {form.projectId && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 14, marginBottom: 2 }}>
+                AI Analysis
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                {pendingCount > 0
+                  ? `${pendingCount} photo${pendingCount === 1 ? '' : 's'} uploaded and waiting to be analysed.`
+                  : 'No pending photos for this project right now.'}
+              </p>
+            </div>
+            <button className="btn-primary" onClick={handleStartAnalysis}
+              disabled={startingJob || pendingCount === 0 || (job && !['done', 'failed'].includes(job.status))}>
+              {startingJob ? 'Starting…' : '▶ Start AI Analysis'}
+            </button>
+          </div>
+
+          {job && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                <span style={{ color: 'var(--text-2)' }}>
+                  {job.status === 'pending' && 'Queued…'}
+                  {job.status === 'running' && `Analysing ${job.processed_images}/${job.total_images}…`}
+                  {job.status === 'done' && `Done — ${job.processed_images}/${job.total_images} analysed`}
+                  {job.status === 'failed' && `Failed — ${job.error_message || 'see server logs'}`}
+                </span>
+                {job.failed_images > 0 && (
+                  <span style={{ color: '#F87171' }}>{job.failed_images} failed</span>
+                )}
+              </div>
+              <div style={{ height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', borderRadius: 4,
+                  width: `${job.total_images ? Math.round((job.processed_images / job.total_images) * 100) : 0}%`,
+                  background: job.status === 'failed' ? '#F87171' : job.status === 'done' ? '#22C55E' : 'var(--amber)',
+                  transition: 'width .3s',
+                }} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Results */}
       {results.length > 0 && (
@@ -151,7 +256,7 @@ export default function Upload() {
               <span style={{ fontSize: 15 }}>{r.status === 'ok' ? '✅' : '❌'}</span>
               <span style={{ flex: 1, fontSize: 13, color: 'var(--text-2)' }}>{r.name}</span>
               <span style={{ fontSize: 12, fontWeight: 500, color: r.status === 'ok' ? '#4ADE80' : '#F87171' }}>
-                {r.status === 'ok' ? 'AI analysis queued' : 'Failed'}
+                {r.status === 'ok' ? 'Uploaded — pending analysis' : 'Failed'}
               </span>
             </div>
           ))}

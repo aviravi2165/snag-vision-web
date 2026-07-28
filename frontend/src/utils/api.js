@@ -50,6 +50,28 @@ export const getActivities = (projectId) => api.get(`/projects/${projectId}/acti
 export const setActivities = (projectId, activities) =>
   api.put(`/projects/${projectId}/activities`, { activities })
 
+// Activity Excel — the uploaded file becomes the project's master progress
+// sheet, kept in sync in place (see backend/services/excel_service.py).
+export const uploadActivityExcel = (projectId, file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post(`/projects/${projectId}/activity-excel`, formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } })
+}
+export const getActivityExcel = (projectId) => api.get(`/projects/${projectId}/activity-excel`)
+export const downloadActivityExcelUrl = (projectId) => `/api/projects/${projectId}/activity-excel/download`
+export const updateUnitMap = (projectId, links) =>
+  api.put(`/projects/${projectId}/activity-excel/unit-map`, links)
+export const getActivityMapping = (projectId) => api.get(`/projects/${projectId}/activity-mapping`)
+export const getUnmappedComponents = (projectId) => api.get(`/projects/${projectId}/unmapped-components`)
+export const getProgressMatrix = (projectId) => api.get(`/projects/${projectId}/progress`)
+
+// ─── AI Analysis jobs ("Start AI Analysis" — decoupled from upload) ─────────
+export const getPendingAnalysisCount = (projectId) => api.get(`/projects/${projectId}/analysis/pending-count`)
+export const startAnalysis = (projectId) => api.post(`/projects/${projectId}/analysis/start`)
+export const getAnalysisJobs = (projectId) => api.get(`/projects/${projectId}/analysis/jobs`)
+export const getAnalysisJob = (projectId, jobId) => api.get(`/projects/${projectId}/analysis/jobs/${jobId}`)
+
 // ─── Uploads & Analysis ─────────────────────────────────────────────────────
 export const uploadMedia = (formData) =>
   api.post('/uploads', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
