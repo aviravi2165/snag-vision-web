@@ -37,17 +37,14 @@ export default function Login() {
           {/* Brand */}
           <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700,
             fontSize: 34, letterSpacing: '-0.03em', lineHeight: 1.3, paddingBottom: 4,
-            marginBottom: 4 }}>
-            Snag<span style={{ color: '#D32F2F' }}>Vision</span>
+            marginBottom: 4, color: '#FFFFFF' }}>
+            VESTIGIA
           </div>
-          <div style={{ fontSize: 11, color: '#8A8F99', letterSpacing: '.18em',
-            textTransform: 'uppercase', marginBottom: 40 }}>
-            Unified Platform · by IEVO
+          <div style={{ fontSize: 13, color: '#C9CDD4', fontStyle: 'italic', marginBottom: 8 }}>
+            The Verifiable Record of Execution.
           </div>
-
-          <div style={{ fontSize: 15, color: '#C9CDD4', marginBottom: 32 }}>
-            Monitor <span style={{ color: '#D32F2F' }}>|</span> Analyse
-            <span style={{ color: '#D32F2F' }}>|</span> Deliver
+          <div style={{ fontSize: 11, color: '#8A8F99', letterSpacing: '.05em', marginBottom: 40 }}>
+            By I.EVO
           </div>
 
           {/* Feature list */}
@@ -62,7 +59,7 @@ export default function Login() {
         </div>
 
         <div style={{ fontSize: 11, color: '#5C616B', letterSpacing: '.05em' }}>
-          IEVO — INTERIOR CONSTRUCTION MONITORING
+          I.EVO — INTERIOR CONSTRUCTION MONITORING
         </div>
       </div>
 

@@ -5,7 +5,7 @@ import { useProject } from '../hooks/useProject'
 import { Spinner, ProgressBar, StatusBadge, ProgressRing, SectionTitle, Empty } from '../components/UI'
 import FloorViewNew from './FloorViewNew'
 
-const NEW_FLOORVIEW_KEY = 'snagvision_new_floorview_enabled'
+const NEW_FLOORVIEW_KEY = 'vestigia_new_floorview_enabled'
 
 function heatStyle(pct) {
   if (pct >= 95) return { bg: 'rgba(34,197,94,.12)', border: 'rgba(34,197,94,.25)', text: '#4ADE80' }

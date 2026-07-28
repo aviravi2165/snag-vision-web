@@ -70,8 +70,35 @@ def _guess_mime(ext: str) -> str:
         ".mp4": "video/mp4",
         ".mov": "video/quicktime",
         ".webp": "image/webp",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }
     return mapping.get(ext, "application/octet-stream")
+
+
+async def download_media(gcs_path: str) -> bytes:
+    """Read back bytes previously stored via upload_media() — needed for in-place
+    edits (e.g. syncing the Activity Excel) where we must load-modify-save the
+    same file rather than starting from a fresh template."""
+    bucket = _get_bucket()
+    if bucket and settings.GCS_PROJECT_ID:
+        blob = bucket.blob(gcs_path)
+        return blob.download_as_bytes()
+    async with aiofiles.open(gcs_path, "rb") as f:
+        return await f.read()
+
+
+async def upload_bytes_to_path(file_bytes: bytes, gcs_path: str, content_type: str) -> str:
+    """Overwrite the file at an already-known path/blob (used to sync the
+    Activity Excel back in place after AI analysis updates progress cells)."""
+    bucket = _get_bucket()
+    if bucket and settings.GCS_PROJECT_ID:
+        blob = bucket.blob(gcs_path)
+        blob.upload_from_string(file_bytes, content_type=content_type)
+        blob.make_public()
+        return blob.public_url
+    async with aiofiles.open(gcs_path, "wb") as f:
+        await f.write(file_bytes)
+    return f"/uploads/{Path(gcs_path).name}"
 
 
 async def delete_media(gcs_path: str):

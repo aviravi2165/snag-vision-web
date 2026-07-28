@@ -29,9 +29,8 @@ def _get_client():
         _client = genai.Client(api_key=api_key)
     return _client
 
-# Fallback component list used only when a project has no custom Activity Plan set
-# (Projects page → Activity Plan). Kept for backward compatibility with existing
-# projects/analyses that already used these keys.
+# Fallback component list — only used by build_prompt()'s legacy activity_names
+# path below, kept for backward compatibility with older direct callers.
 DEFAULT_ACTIVITIES = [
     "design_approval", "carpentry_frame", "polishing_painting",
     "upholstery_work", "hardware_fitting", "packaging_delivery", "site_installation",
@@ -47,16 +46,26 @@ def slugify_activity(name: str) -> str:
 
 
 def build_prompt(activity_names: Optional[List[str]] = None) -> str:
-    """Builds the Gemini prompt from a project's Activity Plan (or the default
-    furniture-category list if none is set). The JSON schema keys are the
-    slugified activity names, so the rest of the pipeline (components dict,
-    Executive dashboard, radar charts) works unchanged regardless of which
-    activity names a given project uses."""
-    names = activity_names or DEFAULT_ACTIVITIES
-    keys = [slugify_activity(n) for n in names]
-    schema_lines = ",\n".join(f'  "{k}": <0-100 or null>' for k in keys)
-    bullet_lines = "\n".join(f"- {n}" for n in names)
-    return f"""
+    """Builds the Gemini prompt.
+
+    Open-vocabulary mode (default, activity_names=None): Gemini freely detects
+    whatever construction/interior components it visually recognizes in the
+    photo (its own vocabulary — nothing hardcoded here) and scores each with a
+    confidence. This decouples vision output from any one project's activity
+    names — a separate per-project mapping (services/mapping_service.py)
+    translates components -> activities at aggregation time, so re-mapping
+    never requires re-running AI. See system-wide architecture notes in
+    services/mapping_service.py.
+
+    Legacy mode (activity_names passed): scores directly against the given
+    activity names instead — kept only for any caller still using the older
+    direct-activity-name flow.
+    """
+    if activity_names:
+        keys = [slugify_activity(n) for n in activity_names]
+        schema_lines = ",\n".join(f'  "{k}": <0-100 or null>' for k in keys)
+        bullet_lines = "\n".join(f"- {n}" for n in activity_names)
+        return f"""
 You are an expert construction/interior-fit-out progress inspector.
 Analyse the provided site photo. Estimate the completion percentage for each
 activity below, based only on visible evidence in the image.
@@ -78,10 +87,39 @@ Respond ONLY with a valid JSON object matching this schema:
 }}
 """
 
+    return """
+You are an expert construction/interior-fit-out progress inspector.
+Analyse the provided site photo. Freely identify every distinct construction
+or interior-fit-out component you can visually recognize in the image (for
+example: flooring material, wall finish, paint, ceiling work, doors, windows,
+glass, cabinetry, wardrobes, electrical fittings, plumbing fixtures, hardware,
+lighting — but do NOT limit yourself to this list; use whatever specific,
+short, lowercase, underscore-separated component name best matches what you
+actually see). For each component you identify, estimate its completion
+percentage and how confident you are in that estimate.
+
+Evaluation Rules:
+- clearly visible and 100% done: pct 100
+- partially done: pct 10-90
+- minimal work started: pct 10-30
+- confidence: 0.0-1.0, how sure you are of this specific estimate
+- do not invent components that aren't visible in the photo
+
+Respond ONLY with a valid JSON object matching this schema:
+{
+  "components": {
+    "<component_name>": {"pct": <0-100>, "confidence": <0.0-1.0>},
+    ...
+  },
+  "overall_pct": <0-100, overall estimated completion of the room shown>,
+  "notes": "string description"
+}
+"""
+
 # 1. 'async def' lagaya taaki 'await' kaam kare.
 # 2. '*args' aur '**kwargs' lagaya taaki uploads.py jo extra 2 arguments bhej raha hai usse error na aaye.
-# 3. 'activity_names' — jab project ka apna Activity Plan set ho, wahi categories
-#    Gemini ko bhejo (build_prompt), warna DEFAULT_ACTIVITIES pe fallback ho jata hai.
+# 3. 'activity_names' — legacy path only (see build_prompt docstring); omit it
+#    (default) to get open-vocabulary component detection.
 async def analyse_image(image_b64, *args, activity_names: Optional[List[str]] = None, **kwargs):
     prompt = build_prompt(activity_names)
     try:

@@ -49,17 +49,14 @@ export default function Register() {
           {/* Brand */}
           <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700,
             fontSize: 34, letterSpacing: '-0.03em', lineHeight: 1.3, paddingBottom: 4,
-            marginBottom: 4 }}>
-            Snag<span style={{ color: '#D32F2F' }}>Vision</span>
+            marginBottom: 4, color: '#FFFFFF' }}>
+            VESTIGIA
           </div>
-          <div style={{ fontSize: 11, color: '#8A8F99', letterSpacing: '.18em',
-            textTransform: 'uppercase', marginBottom: 40 }}>
-            Unified Platform · by IEVO
+          <div style={{ fontSize: 13, color: '#C9CDD4', fontStyle: 'italic', marginBottom: 8 }}>
+            The Verifiable Record of Execution.
           </div>
-
-          <div style={{ fontSize: 15, color: '#C9CDD4', marginBottom: 32 }}>
-            Monitor <span style={{ color: '#D32F2F' }}>|</span> Analyse
-            <span style={{ color: '#D32F2F' }}>|</span> Deliver
+          <div style={{ fontSize: 11, color: '#8A8F99', letterSpacing: '.05em', marginBottom: 40 }}>
+            By I.EVO
           </div>
 
           {/* Feature list */}
@@ -74,7 +71,7 @@ export default function Register() {
         </div>
 
         <div style={{ fontSize: 11, color: '#5C616B', letterSpacing: '.05em' }}>
-          IEVO — INTERIOR CONSTRUCTION MONITORING
+          I.EVO — INTERIOR CONSTRUCTION MONITORING
         </div>
       </div>
 
@@ -90,7 +87,7 @@ export default function Register() {
           <h2 style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: 26, fontWeight: 700,
             color: '#111111', marginBottom: 4 }}>Create account</h2>
           <p style={{ fontSize: 13, color: '#666666', marginBottom: 28 }}>
-            Get started with SnagVision
+            Get started with VESTIGIA
           </p>
 
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

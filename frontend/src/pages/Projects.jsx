@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import toast from 'react-hot-toast'
-import * as XLSX from 'xlsx'
 import {
   createProject, getFloors, addFloor, getUnits, addUnit, getRooms, addRoom,
   getActivities, setActivities as saveActivities,
+  uploadActivityExcel, updateUnitMap,
 } from '../utils/api'
 import { useProject } from '../hooks/useProject'
 
@@ -56,6 +56,14 @@ export default function Projects() {
   const [newActivity,   setNewActivity]     = useState('')
   const [newTargetDate, setNewTargetDate]   = useState('')
   const [savingPlan,    setSavingPlan]      = useState(false)
+  const [uploadingExcel, setUploadingExcel] = useState(false)
+  // Excel columns are Units (e.g. "A-101") — the Activity Excel's "Room" grain.
+  // Area-level (Living/Bathroom) breakdown stays Floor View's job; columns that
+  // couldn't be auto-matched to a real Setup-phase Unit are surfaced here for a
+  // manual link instead of a guess.
+  const [unmatchedCols, setUnmatchedCols]   = useState([])
+  const [unitLinks,     setUnitLinks]       = useState({})   // { col_index: unit_id }
+  const [projectUnits,  setProjectUnits]    = useState([])   // all units in the project, for the link picker
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -78,67 +86,55 @@ export default function Projects() {
   }
   const removeActivity = (name) => setActivitiesState(prev => prev.filter(a => a.name !== name))
 
-  // Excel date serials/Date objects -> 'YYYY-MM-DD'
-  const toIsoDate = (raw) => {
-    if (!raw) return null
-    const d = raw instanceof Date ? raw : new Date(raw)
-    return isNaN(d) ? null : d.toISOString().slice(0, 10)
+  // All Units across the project's floors — used to build the "link this
+  // Excel column to a Unit" picker for unmatched columns. No need to drill
+  // into Areas (Room model) here — that's Floor View's concern, not this one.
+  const fetchProjectUnits = async (projectId) => {
+    const { data: projFloors } = await getFloors(projectId)
+    const all = []
+    for (const f of projFloors) {
+      const { data: projUnits } = await getUnits(f.id)
+      for (const u of projUnits) all.push({ id: u.id, label: `Floor ${f.floor_number} | ${u.unit_number}` })
+    }
+    return all
   }
 
-  const handleExcelUpload = (e) => {
+  const handleExcelUpload = async (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (evt) => {
-      try {
-        const wb = XLSX.read(evt.target.result, { type: 'array', cellDates: true })
-        const sheet = wb.Sheets[wb.SheetNames[0]]
-        const json = XLSX.utils.sheet_to_json(sheet, { defval: '' })
-
-        let parsed = []
-        if (json.length && typeof json[0] === 'object') {
-          // Sheet has headers — find the activity-name column and an optional
-          // target-date column (Target Date / Deadline / Completion Date / etc.)
-          const keys = Object.keys(json[0])
-          const isNumericColumn = (k) => json.every(row => {
-            const v = row[k]
-            return v === '' || v === null || v === undefined || (!isNaN(Number(v)) && !(v instanceof Date))
-          })
-          const dateKey = keys.find(k => /date|deadline|target|completion|due/i.test(k))
-          // Name column: prefer an explicitly-labelled, non-numeric column (skips
-          // serial-number columns like "S.No" / "#" that would otherwise get
-          // picked up as the "name"); fall back to the first non-numeric,
-          // non-date column in the sheet.
-          const nameKey =
-            keys.find(k => /activity|task|item|scope|description|work/i.test(k) && !isNumericColumn(k)) ||
-            keys.find(k => k !== dateKey && !isNumericColumn(k)) ||
-            keys[0]
-          parsed = json.map(row => ({
-            name: String(row[nameKey] ?? '').trim(),
-            target_date: dateKey ? toIsoDate(row[dateKey]) : null,
-          }))
-        }
-        parsed = parsed.filter(r => r.name && !/^activity(\s*(name|plan))?$/i.test(r.name))
-
-        const unique = []
-        for (const r of parsed) {
-          if (!unique.some(u => u.name.toLowerCase() === r.name.toLowerCase())) unique.push(r)
-        }
-        if (unique.length === 0) { toast.error('No activity names found in file'); return }
-        setActivitiesState(prev => {
-          const merged = [...prev]
-          for (const r of unique) {
-            if (!merged.some(m => m.name.toLowerCase() === r.name.toLowerCase())) merged.push(r)
-          }
-          return merged
-        })
-        toast.success(`${unique.length} activities imported`)
-      } catch {
-        toast.error('Could not read this file — check it is a valid .xlsx/.csv')
+    if (!file || !sel.project) return
+    setUploadingExcel(true)
+    setUnmatchedCols([])
+    setUnitLinks({})
+    try {
+      const { data } = await uploadActivityExcel(sel.project, file)
+      setActivitiesState(data.activities)
+      if (data.unmatched_columns?.length) {
+        setUnmatchedCols(data.unmatched_columns)
+        setProjectUnits(await fetchProjectUnits(sel.project))
+        toast(`${data.activities.length} activities loaded — ${data.unmatched_columns.length} room column(s) need manual linking`, { icon: '⚠️' })
+      } else {
+        toast.success(`${data.activities.length} activities loaded, ${data.matched_rooms} room columns matched`)
       }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not process this Excel file')
+    } finally {
+      setUploadingExcel(false)
     }
-    reader.readAsArrayBuffer(file)
+  }
+
+  const handleSaveUnitLinks = async () => {
+    const links = Object.entries(unitLinks)
+      .filter(([, unitId]) => unitId)
+      .map(([colIndex, unitId]) => ({ unit_id: unitId, col_index: Number(colIndex) }))
+    if (!links.length) { toast.error('Pick a room for at least one column'); return }
+    try {
+      await updateUnitMap(sel.project, links)
+      setUnmatchedCols(prev => prev.filter(c => !unitLinks[c.col_index]))
+      toast.success('Room links saved')
+    } catch {
+      toast.error('Failed to save room links')
+    }
   }
 
   const handleSavePlan = async () => {
@@ -258,16 +254,20 @@ export default function Projects() {
         ) : (
           <>
             <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
-              Upload an Excel/CSV file listing the activities to track for this project, with an activity
-              name column (e.g. Commercial Tiles, Wall Panelling) and a target/planned completion date
-              column. AI analysis scores each activity's actual completion %, and the target date lets
-              the Executive dashboard show planned-vs-actual progress and flag delays.
+              Upload the project's Activity Excel — an activity name column, optional start/end date
+              columns, and one column per Room (e.g. "A-101" — a Unit as a whole, combining all its
+              Areas). It becomes the project's master progress sheet: AI analysis scores each activity's
+              actual completion % per Room, and this exact file is kept in sync in place (formulas,
+              formatting, and other sheets untouched) as new analyses land. Per-Area (e.g. Living Room /
+              Bathroom) breakdown stays on the Floor View page, unaffected by this.
             </p>
-            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv"
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls"
               onChange={handleExcelUpload} style={{ display: 'none' }} />
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
               <button className="btn-primary" style={{ whiteSpace: 'nowrap' }}
-                onClick={() => fileInputRef.current?.click()}>⬆ Upload Excel/CSV</button>
+                onClick={() => fileInputRef.current?.click()} disabled={uploadingExcel}>
+                {uploadingExcel ? 'Uploading…' : '⬆ Upload Activity Excel'}
+              </button>
               <input placeholder="…or add one manually" value={newActivity}
                 onChange={e => setNewActivity(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') addActivity() }}
@@ -277,6 +277,28 @@ export default function Projects() {
               <button className="btn-ghost" style={{ whiteSpace: 'nowrap', padding: '8px 12px' }}
                 onClick={addActivity}>+ Add</button>
             </div>
+            {unmatchedCols.length > 0 && (
+              <div style={{ background: 'var(--amber-glow)', border: '1px solid var(--amber-dim)',
+                borderRadius: 8, padding: 12, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+                  ⚠ {unmatchedCols.length} room column{unmatchedCols.length === 1 ? '' : 's'} in the
+                  Excel didn't match a Room (Unit) number exactly — link each to the right Room below.
+                </div>
+                {unmatchedCols.map(c => (
+                  <div key={c.col_index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, minWidth: 140 }}>"{c.header}"</span>
+                    <select value={unitLinks[c.col_index] || ''} style={{ flex: 1 }}
+                      onChange={e => setUnitLinks(prev => ({ ...prev, [c.col_index]: e.target.value }))}>
+                      <option value="">— select room —</option>
+                      {projectUnits.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
+                    </select>
+                  </div>
+                ))}
+                <button className="btn-ghost" style={{ marginTop: 4 }} onClick={handleSaveUnitLinks}>
+                  Save room links
+                </button>
+              </div>
+            )}
             {activities.length === 0 ? (
               <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
                 No activities yet — none added means AI falls back to the default furniture-category list.

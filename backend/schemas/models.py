@@ -54,12 +54,25 @@ class ProjectOut(BaseModel):
 
 
 class ActivityItem(BaseModel):
+    id: Optional[str] = None
     name: str
-    target_date: Optional[str] = None  # ISO date string (YYYY-MM-DD), the planned completion date
+    start_date: Optional[str] = None   # ISO date string (YYYY-MM-DD)
+    target_date: Optional[str] = None  # ISO date string — alias for the activity's end/target date
 
 
 class ActivityPlanIn(BaseModel):
     activities: List[ActivityItem]
+
+
+class UnitMapIn(BaseModel):
+    unit_id: str
+    col_index: int
+
+
+class ActivityMappingIn(BaseModel):
+    component_key: str
+    activity_id: str
+    confidence: float = 1.0
 
 
 # --- Floor / Unit / Room ---
