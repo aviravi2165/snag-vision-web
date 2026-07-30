@@ -36,6 +36,19 @@ class AnalysisJobStatus(str, enum.Enum):
     failed = "failed"
 
 
+class IssueStatus(str, enum.Enum):
+    open = "open"
+    in_progress = "in_progress"
+    resolved = "resolved"
+    closed = "closed"
+
+
+class IssuePriority(str, enum.Enum):
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
 class User(Base):
     __tablename__ = "users"
     id = Column(String(36), primary_key=True, default=gen_uuid)
@@ -332,3 +345,89 @@ class AnalysisJob(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Site Photo Viewer markers + Issue Management
+# (place a marker on a panorama/photo, attach an issue to it, and have it
+# reappear whenever that location is viewed again — see routers/issues.py and
+# frontend/src/components/markers/. Trial feature; all three tables are
+# additive and independently droppable.)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class Marker(Base):
+    """A pin placed on a captured photo, deliberately NOT issue-specific —
+    `marker_type` is the extension point so AI-detected defects, progress
+    checkpoints, QA inspections and safety observations can reuse this exact
+    table and the frontend's MarkerLayer without touching Issue at all.
+
+    Anchoring: a marker belongs to a LOCATION (`location_id` — the Spot or
+    sub-Room the Site Photo Viewer's 4th filter resolves to), not to one
+    image. That's why it still shows when a later capture of the same spot is
+    opened, which is the whole point for construction monitoring — you can see
+    whether the defect got fixed. `origin_upload_id`/`origin_captured_at`
+    record the specific capture it was raised against.
+    """
+    __tablename__ = "markers"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    marker_type = Column(String(30), default="issue", nullable=False)
+    # "equirect" = normalized 360° sphere coords (yaw/pitch mapped to 0..1);
+    # "image"    = plain flat-photo coords (fraction of width/height).
+    # Both are resolution-independent — see Panorama360's projection helpers.
+    space = Column(String(20), default="equirect", nullable=False)
+    u = Column(Float, nullable=False)
+    v = Column(Float, nullable=False)
+    # Location anchor (mirrors PanoramaViewer's cascade)
+    floor_id = Column(String(36), nullable=True)
+    parent_location_id = Column(String(36), nullable=True)   # Unit, or flat mobile Room
+    location_id = Column(String(36), nullable=False, index=True)  # Spot or sub-Room
+    location_kind = Column(String(20), nullable=True)        # "subroom" | "spot"
+    # Which capture it was raised against
+    origin_upload_id = Column(String(36), ForeignKey("media_uploads.id"), nullable=True)
+    origin_captured_at = Column(DateTime, nullable=True)
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    issues = relationship("Issue", back_populates="marker", cascade="all, delete")
+
+
+class Issue(Base):
+    """A defect/observation raised against a Marker. marker_id is nullable so a
+    location-level issue with no pin is representable later without a schema
+    change."""
+    __tablename__ = "issues"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    marker_id = Column(String(36), ForeignKey("markers.id"), nullable=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    priority = Column(Enum(IssuePriority), default=IssuePriority.medium)
+    status = Column(Enum(IssueStatus), default=IssueStatus.open)
+    due_date = Column(DateTime, nullable=True)
+    # JSON lists rather than join tables — consistent with this codebase's
+    # existing use of JSON columns (site_floors, activity_plan, unit_col_map)
+    # and keeps this trial feature to three droppable tables.
+    tags = Column(JSON, nullable=True)           # list[str]
+    assignee_ids = Column(JSON, nullable=True)   # list[user id]
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+    marker = relationship("Marker", back_populates="issues")
+    comments = relationship(
+        "IssueComment", back_populates="issue",
+        cascade="all, delete", order_by="IssueComment.created_at",
+    )
+
+
+class IssueComment(Base):
+    """Discussion thread on an issue. Status transitions are appended here with
+    kind="status_change" so the thread doubles as an audit trail."""
+    __tablename__ = "issue_comments"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    issue_id = Column(String(36), ForeignKey("issues.id"), nullable=False)
+    author_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    body = Column(Text, nullable=False)
+    kind = Column(String(20), default="comment")   # "comment" | "status_change"
+    created_at = Column(DateTime, default=datetime.utcnow)
+    issue = relationship("Issue", back_populates="comments")

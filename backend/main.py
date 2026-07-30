@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from config import settings
 from models import init_db, SessionLocal
-from routers import auth, projects, uploads, analysis, mobile, site, analysis_jobs
+from routers import auth, projects, uploads, analysis, mobile, site, analysis_jobs, issues
 from services.job_worker import job_worker_loop
 from seed import seed_demo_data
 
@@ -30,6 +30,10 @@ app.include_router(analysis.router)
 app.include_router(mobile.router)
 app.include_router(site.router)
 app.include_router(analysis_jobs.router)
+# Site Photo Viewer markers + Issue Management (trial). Two routers: the
+# generic marker layer is deliberately not nested under /issues.
+app.include_router(issues.markers_router)
+app.include_router(issues.router)
 
 # Serve local uploads (POC fallback when GCS not configured)
 uploads_dir = Path("./uploads")

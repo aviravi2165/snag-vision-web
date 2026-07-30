@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 from datetime import datetime
-from models.database import UserRole, UploadStatus
+from models.database import UserRole, UploadStatus, IssueStatus, IssuePriority
 
 
 # --- Auth ---
@@ -216,4 +216,91 @@ class HotspotCreate(BaseModel):
     y_pct: float
     room_id: Optional[str] = None
     room_name: Optional[str] = None
+
+
+# --- Site Photo Viewer markers + Issue Management ---------------------------
+# See routers/issues.py. MarkerIn is intentionally issue-agnostic so other
+# marker types (AI defects, QA, safety) can post the same shape later.
+
+class MarkerIn(BaseModel):
+    space: str = "equirect"          # "equirect" (360 sphere) | "image" (flat photo)
+    u: float
+    v: float
+    location_id: str                 # the Spot / sub-Room the viewer resolved to
+    location_kind: Optional[str] = None      # "subroom" | "spot"
+    parent_location_id: Optional[str] = None # Unit, or flat mobile Room
+    floor_id: Optional[str] = None
+    origin_upload_id: Optional[str] = None
+    marker_type: str = "issue"
+
+
+class MarkerOut(BaseModel):
+    id: str
+    project_id: str
+    marker_type: str
+    space: str
+    u: float
+    v: float
+    floor_id: Optional[str] = None
+    parent_location_id: Optional[str] = None
+    location_id: str
+    location_kind: Optional[str] = None
+    origin_upload_id: Optional[str] = None
+    origin_captured_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class IssueCreate(BaseModel):
+    project_id: str
+    title: str
+    description: Optional[str] = None
+    priority: IssuePriority = IssuePriority.medium
+    due_date: Optional[datetime] = None
+    tags: List[str] = []
+    assignee_ids: List[str] = []
+    marker: Optional[MarkerIn] = None   # created atomically with the issue
+
+
+class IssueUpdate(BaseModel):
+    """Every field optional — this is a PATCH; only what's sent is changed."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[IssuePriority] = None
+    status: Optional[IssueStatus] = None
+    due_date: Optional[datetime] = None
+    tags: Optional[List[str]] = None
+    assignee_ids: Optional[List[str]] = None
+
+
+class IssueCommentIn(BaseModel):
+    body: str
+
+
+class IssueCommentOut(BaseModel):
+    id: str
+    issue_id: str
+    body: str
+    kind: str
+    created_at: datetime
+    author: Optional[Dict[str, Any]] = None
+
+
+class IssueOut(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    description: Optional[str] = None
+    priority: IssuePriority
+    status: IssueStatus
+    due_date: Optional[datetime] = None
+    tags: List[str] = []
+    assignee_ids: List[str] = []
+    assignees: List[Dict[str, Any]] = []   # resolved {id,name,email} for display
+    created_by: Optional[str] = None
+    created_by_user: Optional[Dict[str, Any]] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    marker: Optional[MarkerOut] = None
+    comment_count: int = 0
 
