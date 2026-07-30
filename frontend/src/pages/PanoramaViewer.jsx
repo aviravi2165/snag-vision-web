@@ -17,9 +17,16 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import * as THREE from 'three'
+import toast from 'react-hot-toast'
 import { useProject } from '../hooks/useProject'
 import { getFloors, getUnits, getRooms, getRoomUploads, getFloorRooms, getRoomSpots } from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
+import useIssues from '../hooks/useIssues'
+import MarkerLayer, { projectFlat } from '../components/markers/MarkerLayer'
+import Drawer from '../components/issues/Drawer'
+import IssueFormPanel from '../components/issues/IssueFormPanel'
+import IssueListPanel from '../components/issues/IssueListPanel'
+import IssueDetailsPanel from '../components/issues/IssueDetailsPanel'
 
 function formatDate(isoDate) {
   return new Date(isoDate + 'T00:00:00').toLocaleDateString(undefined, {
@@ -27,17 +34,97 @@ function formatDate(isoDate) {
   })
 }
 
+// Tracks an element's rendered size — the flat-photo marker layer needs the
+// image's actual box (which `objectFit: contain` shrinks) to place pins.
+function useBoxSize() {
+  const ref = useRef(null)
+  const [size, setSize] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }))
+    ro.observe(el)
+    setSize({ w: el.clientWidth, h: el.clientHeight })
+    return () => ro.disconnect()
+  }, [])
+  return [ref, size]
+}
+
+const PENDING_ID = '__pending__'
+
+// ─── Equirect marker coordinates ─────────────────────────────────────────────
+// Markers on a 360° sphere are stored as normalized (u, v) in 0..1 rather than
+// pixels, so they're independent of image resolution and viewport size:
+//   u = (yaw + 180) / 360   (horizontal, full turn)
+//   v = (pitch + 90) / 180  (vertical, pole to pole)
+// `dirFromUV` is the exact inverse of `uvFromPoint`, so placing a marker and
+// re-projecting it round-trips to the same screen position.
+const SPHERE_R = 500
+
+function uvFromPoint(p) {
+  const yaw = Math.atan2(-p.x, -p.z)                        // -PI..PI
+  const pitch = Math.asin(Math.max(-1, Math.min(1, p.y / p.length())))  // -PI/2..PI/2
+  return {
+    u: (THREE.MathUtils.radToDeg(yaw) + 180) / 360,
+    v: (THREE.MathUtils.radToDeg(pitch) + 90) / 180,
+  }
+}
+
+function dirFromUV(u, v) {
+  const yaw = THREE.MathUtils.degToRad(u * 360 - 180)
+  const pitch = THREE.MathUtils.degToRad(v * 180 - 90)
+  const cosP = Math.cos(pitch)
+  return new THREE.Vector3(
+    -Math.sin(yaw) * cosP * SPHERE_R,
+    Math.sin(pitch) * SPHERE_R,
+    -Math.cos(yaw) * cosP * SPHERE_R,
+  )
+}
+
 // ─── 360° sphere viewer — drag to look around. Each instance is fully independent, ──
 // so split comparison mounts two of these side by side with no shared state.
-export function Panorama360({ src, height = 320 }) {
+//
+// Marker support is opt-in and renderer-agnostic: this component only knows how
+// to turn (u, v) into on-screen pixels and hand that list to `children`. It has
+// no idea what a marker *means* — issues, AI defects, QA checkpoints all render
+// through the same render-prop. Every marker prop is optional, so the plain
+// `<Panorama360 src=... />` usage is unchanged.
+export function Panorama360({
+  src, height = 320,
+  points = [],            // [{ id, u, v }] to project
+  children,               // (projected) => ReactNode — projected: [{ id, x, y, visible }]
+  placementMode = false,  // crosshair + click-to-place
+  onPlace,                // (u, v) => void
+  focusTo,                // { u, v } — animates the view to centre on this point
+}) {
   const mountRef = useRef(null)
   const rendererRef = useRef(null)
   const meshRef = useRef(null)
+  const cameraRef = useRef(null)
   const frameRef = useRef(null)
   const isDragging = useRef(false)
+  const didDrag = useRef(false)
   const lastMouse = useRef({ x: 0, y: 0 })
+  const downAt = useRef({ x: 0, y: 0 })
   const yaw = useRef(0)
   const pitch = useRef(0)
+  const focusAnim = useRef(null)
+  const projectRef = useRef(null)   // lets prop changes re-project without waiting for a frame
+  // Latest props for the rAF loop / listeners, which are bound once on mount
+  const pointsRef = useRef(points)
+  const placementRef = useRef(placementMode)
+  const onPlaceRef = useRef(onPlace)
+  // Re-project as soon as the marker set changes. The rAF loop covers camera
+  // movement, but waiting for a frame to show a just-saved marker is both a
+  // visible lag and unreliable when the tab isn't compositing.
+  useEffect(() => {
+    pointsRef.current = points
+    projectRef.current?.()
+  }, [points])
+  useEffect(() => { placementRef.current = placementMode }, [placementMode])
+  useEffect(() => { onPlaceRef.current = onPlace }, [onPlace])
+
+  const [projected, setProjected] = useState([])
 
   // Init Three.js scene once
   useEffect(() => {
@@ -49,6 +136,7 @@ export function Panorama360({ src, height = 320 }) {
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(75, W / H, 0.1, 1000)
     camera.rotation.order = 'YXZ'
+    cameraRef.current = camera
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setSize(W, H)
@@ -56,7 +144,7 @@ export function Panorama360({ src, height = 320 }) {
     mount.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    const geo = new THREE.SphereGeometry(500, 60, 40)
+    const geo = new THREE.SphereGeometry(SPHERE_R, 60, 40)
     const mat = new THREE.MeshBasicMaterial({ color: 0x1a1d26, side: THREE.BackSide })
     const mesh = new THREE.Mesh(geo, mat)
     scene.add(mesh)
@@ -64,7 +152,54 @@ export function Panorama360({ src, height = 320 }) {
 
     yaw.current = 0; pitch.current = 0
 
-    const animate = () => { frameRef.current = requestAnimationFrame(animate); renderer.render(scene, camera) }
+    // Re-project markers only when the view actually moved (or the marker set
+    // changed) — otherwise this would setState 60x/sec forever. `lastKey` is
+    // only committed once a projection actually happens, so a frame that lands
+    // while the element has no size doesn't permanently suppress the next one.
+    let lastKey = ''
+    const projectMarkers = () => {
+      const pts = pointsRef.current
+      const key = `${yaw.current.toFixed(2)}|${pitch.current.toFixed(2)}|${pts.map(p => p.id).join(',')}`
+      if (key === lastKey) return
+      const w = mount.clientWidth, h = mount.clientHeight
+      if (!w || !h) return
+      lastKey = key
+      camera.updateMatrixWorld()
+      setProjected(pts.map(p => {
+        const ndc = dirFromUV(p.u, p.v).project(camera)
+        return {
+          id: p.id,
+          x: (ndc.x * 0.5 + 0.5) * w,
+          y: (-ndc.y * 0.5 + 0.5) * h,
+          // z >= 1 means the point is behind the camera
+          visible: ndc.z < 1 && Math.abs(ndc.x) <= 1.15 && Math.abs(ndc.y) <= 1.15,
+        }
+      }))
+    }
+
+    projectRef.current = projectMarkers
+
+    const applyRotation = () => {
+      camera.rotation.y = THREE.MathUtils.degToRad(yaw.current)
+      camera.rotation.x = THREE.MathUtils.degToRad(pitch.current)
+    }
+
+    const animate = () => {
+      frameRef.current = requestAnimationFrame(animate)
+      // Ease toward a focus target (used when an issue is clicked in the list)
+      const f = focusAnim.current
+      if (f) {
+        yaw.current += (f.yaw - yaw.current) * 0.12
+        pitch.current += (f.pitch - pitch.current) * 0.12
+        if (Math.abs(f.yaw - yaw.current) < 0.3 && Math.abs(f.pitch - pitch.current) < 0.3) {
+          yaw.current = f.yaw; pitch.current = f.pitch
+          focusAnim.current = null
+        }
+        applyRotation()
+      }
+      projectMarkers()
+      renderer.render(scene, camera)
+    }
     animate()
 
     const ro = new ResizeObserver(() => {
@@ -77,28 +212,66 @@ export function Panorama360({ src, height = 320 }) {
     ro.observe(mount)
 
     const el = renderer.domElement
-    const onDown = e => { isDragging.current = true; lastMouse.current = { x: e.clientX, y: e.clientY } }
+
+    // A click in placement mode drops a marker; a drag looks around. Rather
+    // than disabling navigation while placing (which makes the viewer feel
+    // broken), we only place when the pointer barely moved between down and up.
+    const DRAG_SLOP_PX = 5
+    const raycaster = new THREE.Raycaster()
+    const placeAt = (clientX, clientY) => {
+      if (!placementRef.current || !onPlaceRef.current) return
+      const rect = el.getBoundingClientRect()
+      const ndc = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      raycaster.setFromCamera(ndc, camera)
+      const hit = raycaster.intersectObject(mesh)[0]
+      if (!hit) return
+      const { u, v } = uvFromPoint(hit.point)
+      onPlaceRef.current(u, v)
+    }
+
+    const onDown = e => {
+      isDragging.current = true
+      didDrag.current = false
+      lastMouse.current = { x: e.clientX, y: e.clientY }
+      downAt.current = { x: e.clientX, y: e.clientY }
+    }
     const onMove = e => {
       if (!isDragging.current) return
       const dx = e.clientX - lastMouse.current.x
       const dy = e.clientY - lastMouse.current.y
       lastMouse.current = { x: e.clientX, y: e.clientY }
+      if (Math.hypot(e.clientX - downAt.current.x, e.clientY - downAt.current.y) > DRAG_SLOP_PX) {
+        didDrag.current = true
+        focusAnim.current = null   // a manual drag cancels any focus animation
+      }
       yaw.current -= dx * 0.3
       pitch.current -= dy * 0.3
       pitch.current = Math.max(-85, Math.min(85, pitch.current))
-      camera.rotation.y = THREE.MathUtils.degToRad(yaw.current)
-      camera.rotation.x = THREE.MathUtils.degToRad(pitch.current)
+      applyRotation()
     }
-    const onUp = () => { isDragging.current = false }
+    const onUp = e => {
+      const wasDragging = isDragging.current
+      isDragging.current = false
+      if (wasDragging && !didDrag.current && e && e.clientX !== undefined) {
+        placeAt(e.clientX, e.clientY)
+      }
+    }
     const onTouchStart = e => { const t = e.touches[0]; onDown({ clientX: t.clientX, clientY: t.clientY }) }
     const onTouchMove = e => { const t = e.touches[0]; onMove({ clientX: t.clientX, clientY: t.clientY }) }
+    const onTouchEnd = e => {
+      const t = e.changedTouches?.[0]
+      onUp(t ? { clientX: t.clientX, clientY: t.clientY } : undefined)
+    }
 
     el.addEventListener('mousedown', onDown)
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     el.addEventListener('touchstart', onTouchStart)
     window.addEventListener('touchmove', onTouchMove)
-    window.addEventListener('touchend', onUp)
+    window.addEventListener('touchend', onTouchEnd)
 
     return () => {
       ro.disconnect()
@@ -108,7 +281,7 @@ export function Panorama360({ src, height = 320 }) {
       window.removeEventListener('mouseup', onUp)
       el.removeEventListener('touchstart', onTouchStart)
       window.removeEventListener('touchmove', onTouchMove)
-      window.removeEventListener('touchend', onUp)
+      window.removeEventListener('touchend', onTouchEnd)
       renderer.dispose()
       if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement)
     }
@@ -138,10 +311,22 @@ export function Panorama360({ src, height = 320 }) {
     )
   }, [src])
 
+  // Centre the view on a point (used when an issue is picked from the list).
+  // The rAF loop eases toward this; a manual drag cancels it.
+  useEffect(() => {
+    if (!focusTo) return
+    focusAnim.current = {
+      yaw: focusTo.u * 360 - 180,
+      pitch: Math.max(-85, Math.min(85, focusTo.v * 180 - 90)),
+    }
+  }, [focusTo])
+
   return (
     <div ref={mountRef} style={{
       width: '100%', height: '100%', minHeight: height, borderRadius: 10, overflow: 'hidden',
-      background: '#0d0f14', cursor: src ? 'grab' : 'default', position: 'relative',
+      background: '#0d0f14',
+      cursor: placementMode ? 'crosshair' : src ? 'grab' : 'default',
+      position: 'relative',
     }}>
       {loadError && (
         <div style={{
@@ -151,6 +336,9 @@ export function Panorama360({ src, height = 320 }) {
           Couldn't load this image ({src})
         </div>
       )}
+      {/* Marker layer — this component supplies screen positions only; what
+          gets drawn is entirely the caller's business. */}
+      {children ? children(projected) : null}
     </div>
   )
 }
@@ -286,7 +474,10 @@ function useImageCascade(projectId) {
   }
 }
 
-function FilterPanel({ title, cascade, viewerHeight = 560 }) {
+function FilterPanel({
+  title, cascade, viewerHeight = 560,
+  projectId, panelKey, drawer, openDrawer, closeDrawer,
+}) {
   const { floors, floorId, setFloorId, units, unitId, setUnitId, unitsLoading,
     rooms, roomId, setRoomId, dateOptions, dateKey, setDateKey,
     activeUpload, loading } = cascade
@@ -297,6 +488,116 @@ function FilterPanel({ title, cascade, viewerHeight = 560 }) {
   // as a normal <img> instead; hotel-flow sub-room uploads keep the sphere.
   const selRoomType = rooms.find(r => r.id === roomId)?.type
   const isFlatPhoto = selRoomType === 'spot'
+
+  // ── Issue management ──────────────────────────────────────────────────────
+  // Scoped to the selected Spot (roomId): markers are anchored to the location,
+  // so they stay put when the user flips between capture dates.
+  const issuesApi = useIssues(projectId, roomId)
+  const { issues, loading: issuesLoading, users, tags } = issuesApi
+
+  const [pending, setPending] = useState(null)      // {u,v} placed but unsaved
+  const [selectedId, setSelectedId] = useState(null) // highlighted marker
+  const [focusTo, setFocusTo] = useState(null)       // 360 view centring target
+  const [flatRef, flatSize] = useBoxSize()
+
+  const mine = drawer?.panel === panelKey ? drawer : null
+  const isPlacing = mine?.mode === 'placing'
+  const space = isFlatPhoto ? 'image' : 'equirect'
+
+  // Only markers recorded in this view's coordinate space are drawable here.
+  const markerIssues = useMemo(
+    () => issues.filter(i => i.marker && i.marker.space === space),
+    [issues, space]
+  )
+  const points = useMemo(() => {
+    const pts = markerIssues.map(i => ({ id: i.marker.id, u: i.marker.u, v: i.marker.v }))
+    if (pending) pts.push({ id: PENDING_ID, u: pending.u, v: pending.v })
+    return pts
+  }, [markerIssues, pending])
+
+  const markerMeta = useMemo(
+    () => markerIssues.map(i => ({
+      id: i.marker.id, status: i.status, markerType: i.marker.marker_type, title: i.title,
+    })),
+    [markerIssues]
+  )
+  const issueByMarkerId = useMemo(
+    () => new Map(markerIssues.map(i => [i.marker.id, i])),
+    [markerIssues]
+  )
+
+  const resetPlacement = useCallback(() => { setPending(null) }, [])
+
+  const handlePlace = useCallback((u, v) => {
+    setPending({ u, v })
+    openDrawer({ panel: panelKey, mode: 'create' })
+  }, [openDrawer, panelKey])
+
+  const handleMarkerClick = useCallback((markerId) => {
+    const issue = issueByMarkerId.get(markerId)
+    if (!issue) return
+    setSelectedId(markerId)
+    openDrawer({ panel: panelKey, mode: 'details', issueId: issue.id })
+  }, [issueByMarkerId, openDrawer, panelKey])
+
+  const selectIssue = useCallback((issue) => {
+    if (issue.marker) {
+      setSelectedId(issue.marker.id)
+      // Swing the 360 view round to the marker so it's actually on screen
+      if (issue.marker.space === 'equirect') {
+        setFocusTo({ u: issue.marker.u, v: issue.marker.v })
+      }
+    }
+    openDrawer({ panel: panelKey, mode: 'details', issueId: issue.id })
+  }, [openDrawer, panelKey])
+
+  const submitIssue = useCallback(async (form) => {
+    await issuesApi.create({
+      ...form,
+      project_id: projectId,
+      marker: {
+        space, u: pending.u, v: pending.v,
+        location_id: roomId,
+        location_kind: selRoomType === 'spot' ? 'spot' : 'subroom',
+        parent_location_id: unitId,
+        floor_id: floorId,
+        origin_upload_id: activeUpload?.id || null,
+      },
+    })
+    setPending(null)
+    closeDrawer()
+    toast.success('Issue created')
+  }, [issuesApi, projectId, space, pending, roomId, selRoomType, unitId, floorId, activeUpload, closeDrawer])
+
+  const changeStatus = useCallback(
+    (id, status) => issuesApi.update(id, { status }),
+    [issuesApi]
+  )
+  const removeIssue = useCallback(async (id) => {
+    await issuesApi.remove(id)
+    setSelectedId(null)
+    closeDrawer()
+    toast.success('Issue deleted')
+  }, [issuesApi, closeDrawer])
+
+  // Placing a marker only makes sense against a specific capture
+  const canMark = Boolean(activeUpload && roomId)
+  const activeIssue = mine?.mode === 'details'
+    ? issues.find(i => i.id === mine.issueId) || null
+    : null
+
+  const renderMarkers = (projected) => {
+    const pend = projected.find(p => p.id === PENDING_ID)
+    return (
+      <MarkerLayer
+        projected={projected.filter(p => p.id !== PENDING_ID)}
+        markers={markerMeta}
+        selectedId={selectedId}
+        onMarkerClick={handleMarkerClick}
+        pendingPoint={pend?.visible ? pend : null}
+      />
+    )
+  }
 
   if (activeUpload) {
     console.log('[PanoramaViewer] activeUpload:', activeUpload,
@@ -347,21 +648,106 @@ function FilterPanel({ title, cascade, viewerHeight = 560 }) {
       <div style={{
         borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border-dim)',
         background: 'var(--bg-base)', height: viewerHeight, display: 'flex',
-        alignItems: 'center', justifyContent: 'center'
+        alignItems: 'center', justifyContent: 'center', position: 'relative',
       }}>
         {loading ? (
           <Spinner />
         ) : activeUpload ? (
           isFlatPhoto ? (
-            <img src={activeUpload.gcs_url} alt="Captured spot"
-              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            // Wrapper shrinks to the rendered image so markers align to the
+            // photo itself, not the letterboxed container around it.
+            <div ref={flatRef} style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', maxHeight: '100%' }}>
+              <img src={activeUpload.gcs_url} alt="Captured spot"
+                onClick={e => {
+                  if (!isPlacing) return
+                  const r = e.currentTarget.getBoundingClientRect()
+                  handlePlace((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height)
+                }}
+                style={{
+                  display: 'block', maxWidth: '100%', maxHeight: viewerHeight,
+                  objectFit: 'contain', cursor: isPlacing ? 'crosshair' : 'default',
+                }} />
+              {renderMarkers(projectFlat(points, flatSize.w, flatSize.h))}
+            </div>
           ) : (
-            <Panorama360 src={activeUpload.gcs_url} height={viewerHeight} />
+            <Panorama360
+              src={activeUpload.gcs_url} height={viewerHeight}
+              points={points} placementMode={isPlacing} onPlace={handlePlace} focusTo={focusTo}
+            >
+              {renderMarkers}
+            </Panorama360>
           )
         ) : (
           <Empty message="No image to show"
             hint="Select Floor, Room ID, Spot and Date to view a photo" />
         )}
+
+        {/* ── Floating issue actions — overlaid so the existing layout is untouched ── */}
+        {canMark && !mine && (
+          <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', gap: 6, zIndex: 10 }}>
+            <FloatingAction onClick={() => openDrawer({ panel: panelKey, mode: 'list' })}>
+              ☰ List Issues{markerIssues.length ? ` (${markerIssues.length})` : ''}
+            </FloatingAction>
+            <FloatingAction onClick={() => openDrawer({ panel: panelKey, mode: 'placing' })}>
+              ⚑ Mark Issue
+            </FloatingAction>
+          </div>
+        )}
+
+        {/* Placement-mode helper */}
+        {isPlacing && (
+          <div style={{
+            position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 10, display: 'flex', alignItems: 'center', gap: 10,
+            background: 'rgba(17,17,17,0.88)', color: '#fff',
+            borderRadius: 20, padding: '7px 14px', fontSize: 12,
+          }}>
+            Click anywhere to place an issue marker
+            <button onClick={() => { resetPlacement(); closeDrawer() }} style={{
+              background: 'none', border: 'none', color: '#fff',
+              cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0, opacity: 0.7,
+            }}>✕</button>
+          </div>
+        )}
+
+        {/* ── Issue drawer — rendered inside this panel, but only one panel can
+            own the drawer at a time (state lives in PanoramaViewer). ── */}
+        <Drawer
+          open={Boolean(mine) && mine.mode !== 'placing'}
+          title={
+            mine?.mode === 'create' ? 'Mark issue'
+              : mine?.mode === 'details' ? 'Issue details'
+                : 'All issues'
+          }
+          subtitle={rooms.find(r => r.id === roomId)?.label}
+          onClose={() => { resetPlacement(); setSelectedId(null); closeDrawer() }}
+        >
+          {mine?.mode === 'create' && (
+            <IssueFormPanel
+              users={users} tagSuggestions={tags}
+              onSubmit={submitIssue}
+              onCancel={() => { resetPlacement(); closeDrawer() }}
+            />
+          )}
+          {mine?.mode === 'list' && (
+            <IssueListPanel
+              issues={issues} loading={issuesLoading}
+              currentUploadId={activeUpload?.id}
+              onSelect={selectIssue}
+            />
+          )}
+          {mine?.mode === 'details' && activeIssue && (
+            <IssueDetailsPanel
+              issue={activeIssue}
+              currentUploadId={activeUpload?.id}
+              onStatusChange={changeStatus}
+              onDelete={removeIssue}
+              loadComments={issuesApi.comments}
+              addComment={issuesApi.comment}
+              onBack={() => openDrawer({ panel: panelKey, mode: 'list' })}
+            />
+          )}
+        </Drawer>
       </div>
 
       {activeUpload && (
@@ -377,9 +763,26 @@ function FilterPanel({ title, cascade, viewerHeight = 560 }) {
   )
 }
 
+function FloatingAction({ onClick, children }) {
+  return (
+    <button onClick={onClick} style={{
+      background: 'rgba(255,255,255,0.94)', border: '1px solid var(--border)',
+      borderRadius: 8, padding: '6px 11px', fontSize: 12, cursor: 'pointer',
+      color: 'var(--text-1)', boxShadow: '0 1px 6px rgba(0,0,0,0.15)',
+      fontFamily: 'inherit', whiteSpace: 'nowrap',
+    }}>{children}</button>
+  )
+}
+
 export default function PanoramaViewer() {
   const { selectedProject } = useProject()
   const [split, setSplit] = useState(false)
+  // Which panel owns the issue drawer, and what it's showing. Hoisted here so
+  // that in split comparison only one drawer can be open at a time.
+  // Shape: { panel: 'left'|'right', mode: 'placing'|'create'|'list'|'details', issueId? }
+  const [drawer, setDrawer] = useState(null)
+  const openDrawer = useCallback((next) => setDrawer(next), [])
+  const closeDrawer = useCallback(() => setDrawer(null), [])
 
   // Two independent cascades always exist; only the right one is shown when split is off.
   const left = useImageCascade(selectedProject?.id)
@@ -432,11 +835,17 @@ export default function PanoramaViewer() {
           hint="Select a project from the sidebar" /></div>
       ) : split ? (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <FilterPanel title="Image 1" cascade={left} viewerHeight={520} />
-          <FilterPanel title="Image 2" cascade={right} viewerHeight={520} />
+          <FilterPanel title="Image 1" cascade={left} viewerHeight={520}
+            projectId={selectedProject.id} panelKey="left"
+            drawer={drawer} openDrawer={openDrawer} closeDrawer={closeDrawer} />
+          <FilterPanel title="Image 2" cascade={right} viewerHeight={520}
+            projectId={selectedProject.id} panelKey="right"
+            drawer={drawer} openDrawer={openDrawer} closeDrawer={closeDrawer} />
         </div>
       ) : (
-        <FilterPanel cascade={left} viewerHeight={640} />
+        <FilterPanel cascade={left} viewerHeight={640}
+          projectId={selectedProject.id} panelKey="left"
+          drawer={drawer} openDrawer={openDrawer} closeDrawer={closeDrawer} />
       )}
     </div>
   )

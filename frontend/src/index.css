@@ -322,3 +322,9 @@
 
 /* ─── Spinner ────────────────────────────────────────────────────────────────── */
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Site Photo Viewer marker pins (components/markers/MarkerLayer.jsx) ────── */
+@keyframes markerPulse {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
