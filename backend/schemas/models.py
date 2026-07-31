@@ -248,6 +248,12 @@ class MarkerOut(BaseModel):
     origin_upload_id: Optional[str] = None
     origin_captured_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    # Human-readable location, resolved server-side so the project-wide issue
+    # list can show and filter by where each issue lives without the client
+    # having to walk the Floor/Unit/Room hierarchy itself.
+    floor_number: Optional[int] = None
+    parent_label: Optional[str] = None   # Room ID (Unit number, or flat Room name)
+    location_label: Optional[str] = None # Spot (sub-Room name, or Spot name)
 
 
 class IssueCreate(BaseModel):

@@ -1,11 +1,12 @@
 /**
  * useIssues — data layer for the Site Photo Viewer's Issue Management.
  *
- * Keeps all fetching/mutating in one place so the drawer components stay
- * presentational. Scoped to a `locationId` (the Spot / sub-Room the viewer's
- * 4th filter resolved to) — markers are anchored to the location rather than
- * to one capture, so everything here reloads when the user changes spot, but
- * NOT when they just switch capture date.
+ * Project-wide by design: the issue list is meant to be the central place to
+ * see and navigate to every issue in the project, not just the ones at the
+ * currently selected Floor/Room/Spot. Each issue carries its own location
+ * metadata (see backend/routers/issues.py::_LocationLabels), so consumers
+ * that need "just the markers for this spot" filter this same list
+ * client-side (see PanoramaViewer.jsx::markerIssues) instead of re-fetching.
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -13,23 +14,23 @@ import {
   getIssueComments, addIssueComment, getUsers,
 } from '../utils/api'
 
-export default function useIssues(projectId, locationId) {
+export default function useIssues(projectId) {
   const [issues, setIssues] = useState([])
   const [loading, setLoading] = useState(false)
   const [users, setUsers] = useState([])
 
   const reload = useCallback(async () => {
-    if (!locationId) { setIssues([]); return }
+    if (!projectId) { setIssues([]); return }
     setLoading(true)
     try {
-      const { data } = await getIssues({ location_id: locationId })
+      const { data } = await getIssues({ project_id: projectId })
       setIssues(data)
     } catch {
       setIssues([])
     } finally {
       setLoading(false)
     }
-  }, [locationId])
+  }, [projectId])
 
   useEffect(() => { reload() }, [reload])
 

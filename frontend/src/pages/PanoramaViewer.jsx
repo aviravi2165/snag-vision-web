@@ -465,12 +465,46 @@ function useImageCascade(projectId) {
 
   const activeUpload = dateOptions.find(([key]) => key === dateKey)?.[1] || null
 
+  // ── Programmatic navigation (issue list → viewer) ─────────────────────────
+  // navigateTo drives the whole Floor→Room ID→Spot→Date cascade at once,
+  // driving the level below only once its list of options has actually
+  // loaded — the same async chain a user clicking through the dropdowns
+  // triggers. `navTarget` is what we're trying to reach; each effect below
+  // fires again whenever navTarget changes (even if the underlying list
+  // reference didn't), so it works whether we're already on the right
+  // floor/unit or need to wait for a fetch.
+  const [navTarget, setNavTarget] = useState(null)
+
+  const navigateTo = useCallback(({ floorId: fId, unitId: uId, roomId: rId, dateKey: dKey }) => {
+    setNavTarget({ unitId: uId, roomId: rId, dateKey: dKey })
+    setFloorId(fId)
+  }, [])
+
+  useEffect(() => {
+    if (!navTarget?.unitId || unitId === navTarget.unitId) return
+    if (units.some(u => u.id === navTarget.unitId)) setUnitId(navTarget.unitId)
+  }, [units, navTarget, unitId])
+
+  useEffect(() => {
+    if (!navTarget?.roomId || roomId === navTarget.roomId) return
+    if (rooms.some(r => r.id === navTarget.roomId)) setRoomId(navTarget.roomId)
+  }, [rooms, navTarget, roomId])
+
+  useEffect(() => {
+    if (!navTarget?.dateKey || !dateOptions.length) return
+    if (dateOptions.some(([k]) => k === navTarget.dateKey)) setDateKey(navTarget.dateKey)
+    // If the exact capture is gone (deleted since), fall back to the latest —
+    // still lands on the right spot, which is the part that matters most.
+    else setDateKey(dateOptions[0][0])
+  }, [dateOptions, navTarget])
+
   return {
     floors, floorId, setFloorId,
     units, unitId, setUnitId, unitsLoading,
     rooms, roomId, setRoomId,
     dateOptions, dateKey, setDateKey,
     activeUpload, loading,
+    navigateTo,
   }
 }
 
@@ -480,7 +514,7 @@ function FilterPanel({
 }) {
   const { floors, floorId, setFloorId, units, unitId, setUnitId, unitsLoading,
     rooms, roomId, setRoomId, dateOptions, dateKey, setDateKey,
-    activeUpload, loading } = cascade
+    activeUpload, loading, navigateTo } = cascade
 
   // Mobile-captured spot photos are plain flat images, not true 360°
   // equirectangular panoramas — the WebGL sphere viewer expects the latter
@@ -490,24 +524,27 @@ function FilterPanel({
   const isFlatPhoto = selRoomType === 'spot'
 
   // ── Issue management ──────────────────────────────────────────────────────
-  // Scoped to the selected Spot (roomId): markers are anchored to the location,
-  // so they stay put when the user flips between capture dates.
-  const issuesApi = useIssues(projectId, roomId)
+  // Project-wide: the list shows every issue in the project, not just the
+  // currently selected Spot — it's the central place to browse and navigate
+  // to any issue. `markerIssues` below narrows to the current view only for
+  // deciding which pins to actually draw on this panorama.
+  const issuesApi = useIssues(projectId)
   const { issues, loading: issuesLoading, users } = issuesApi
 
   const [pending, setPending] = useState(null)      // {u,v} placed but unsaved
   const [selectedId, setSelectedId] = useState(null) // highlighted marker
   const [focusTo, setFocusTo] = useState(null)       // 360 view centring target
+  const [pendingFocusIssueId, setPendingFocusIssueId] = useState(null) // navigating toward this issue
   const [flatRef, flatSize] = useBoxSize()
 
   const mine = drawer?.panel === panelKey ? drawer : null
   const isPlacing = mine?.mode === 'placing'
   const space = isFlatPhoto ? 'image' : 'equirect'
 
-  // Only markers recorded in this view's coordinate space are drawable here.
+  // Only issues at THIS spot, in this view's coordinate space, get a pin here.
   const markerIssues = useMemo(
-    () => issues.filter(i => i.marker && i.marker.space === space),
-    [issues, space]
+    () => issues.filter(i => i.marker && i.marker.location_id === roomId && i.marker.space === space),
+    [issues, roomId, space]
   )
   const points = useMemo(() => {
     const pts = markerIssues.map(i => ({ id: i.marker.id, u: i.marker.u, v: i.marker.v }))
@@ -540,16 +577,43 @@ function FilterPanel({
     openDrawer({ panel: panelKey, mode: 'details', issueId: issue.id })
   }, [issueByMarkerId, openDrawer, panelKey])
 
+  // Clicking an issue in the (project-wide) list may point at a different
+  // Floor/Room/Spot than what's currently on screen — drive the whole cascade
+  // there, then focus the marker and open details once the viewer has
+  // actually arrived (see the effect below, keyed off `pendingFocusIssueId`).
   const selectIssue = useCallback((issue) => {
-    if (issue.marker) {
-      setSelectedId(issue.marker.id)
-      // Swing the 360 view round to the marker so it's actually on screen
-      if (issue.marker.space === 'equirect') {
-        setFocusTo({ u: issue.marker.u, v: issue.marker.v })
-      }
+    const m = issue.marker
+    if (!m) {
+      // No location to navigate to — just show what we have.
+      openDrawer({ panel: panelKey, mode: 'details', issueId: issue.id })
+      return
     }
+    if (roomId === m.location_id && activeUpload) {
+      // Already there — no navigation needed, focus immediately.
+      setSelectedId(m.id)
+      if (m.space === 'equirect') setFocusTo({ u: m.u, v: m.v })
+      openDrawer({ panel: panelKey, mode: 'details', issueId: issue.id })
+      return
+    }
+    navigateTo({
+      floorId: m.floor_id, unitId: m.parent_location_id, roomId: m.location_id,
+      dateKey: m.origin_captured_at ? m.origin_captured_at.slice(0, 10) : null,
+    })
+    setPendingFocusIssueId(issue.id)
+  }, [roomId, activeUpload, navigateTo, openDrawer, panelKey])
+
+  // Fires once the cascade has actually landed on the target spot with an
+  // image loaded — i.e. navigation is visibly complete, not just requested.
+  useEffect(() => {
+    if (!pendingFocusIssueId || !activeUpload) return
+    const issue = issues.find(i => i.id === pendingFocusIssueId)
+    if (!issue?.marker) { setPendingFocusIssueId(null); return }
+    if (roomId !== issue.marker.location_id) return
+    setSelectedId(issue.marker.id)
+    if (issue.marker.space === 'equirect') setFocusTo({ u: issue.marker.u, v: issue.marker.v })
     openDrawer({ panel: panelKey, mode: 'details', issueId: issue.id })
-  }, [openDrawer, panelKey])
+    setPendingFocusIssueId(null)
+  }, [roomId, activeUpload, pendingFocusIssueId, issues, openDrawer, panelKey])
 
   const submitIssue = useCallback(async (form) => {
     await issuesApi.create({
@@ -686,7 +750,7 @@ function FilterPanel({
         {canMark && !mine && (
           <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', gap: 6, zIndex: 10 }}>
             <FloatingAction onClick={() => openDrawer({ panel: panelKey, mode: 'list' })}>
-              ☰ List Issues{markerIssues.length ? ` (${markerIssues.length})` : ''}
+              ☰ List Issues{issues.length ? ` (${issues.length})` : ''}
             </FloatingAction>
             <FloatingAction onClick={() => openDrawer({ panel: panelKey, mode: 'placing' })}>
               ⚑ Mark Issue
@@ -719,8 +783,11 @@ function FilterPanel({
               : mine?.mode === 'details' ? 'Issue details'
                 : 'All issues'
           }
-          subtitle={rooms.find(r => r.id === roomId)?.label}
-          onClose={() => { resetPlacement(); setSelectedId(null); closeDrawer() }}
+          subtitle={
+            mine?.mode === 'list' ? 'Every issue in this project'
+              : rooms.find(r => r.id === roomId)?.label
+          }
+          onClose={() => { resetPlacement(); setSelectedId(null); setPendingFocusIssueId(null); closeDrawer() }}
         >
           {mine?.mode === 'create' && (
             <IssueFormPanel
@@ -731,8 +798,8 @@ function FilterPanel({
           )}
           {mine?.mode === 'list' && (
             <IssueListPanel
-              issues={issues} loading={issuesLoading}
-              currentUploadId={activeUpload?.id}
+              issues={issues} loading={issuesLoading} users={users}
+              currentLocationId={roomId}
               onSelect={selectIssue}
             />
           )}

@@ -26,7 +26,8 @@ from sqlalchemy.orm import Session
 
 from models import get_db
 from models.database import (
-    Issue, IssueComment, IssueStatus, Marker, MediaUpload, Project, User,
+    Floor, Issue, IssueComment, IssuePriority, IssueStatus, Marker, MediaUpload,
+    Project, Room, Spot, Unit, User,
 )
 from routers.auth import get_current_user
 from schemas.models import (
@@ -46,10 +47,51 @@ def _user_out(u: Optional[User]) -> Optional[dict]:
             "role": u.role.value if u.role else None}
 
 
-def _marker_out(m: Optional[Marker]) -> Optional[dict]:
+class _LocationLabels:
+    """Resolves marker location ids -> human labels in bulk.
+
+    The issue list is project-wide, so every row needs to say where it lives.
+    Doing that per-issue would be an N+1 across four tables; this loads each
+    table once per request and serves lookups from memory instead.
+    """
+
+    def __init__(self, markers: List[Marker], db: Session):
+        floor_ids = {m.floor_id for m in markers if m.floor_id}
+        parent_ids = {m.parent_location_id for m in markers if m.parent_location_id}
+        location_ids = {m.location_id for m in markers if m.location_id}
+
+        self.floors = {
+            f.id: f.floor_number
+            for f in (db.query(Floor).filter(Floor.id.in_(floor_ids)).all() if floor_ids else [])
+        }
+        # A "Room ID" is a Unit in the hotel flow and a flat Room in the mobile
+        # flow; a "Spot" is a sub-Room or a Spot. Look in both tables for each.
+        self.units = {
+            u.id: u.unit_number
+            for u in (db.query(Unit).filter(Unit.id.in_(parent_ids)).all() if parent_ids else [])
+        }
+        room_ids = parent_ids | location_ids
+        self.rooms = {
+            r.id: r.name
+            for r in (db.query(Room).filter(Room.id.in_(room_ids)).all() if room_ids else [])
+        }
+        self.spots = {
+            s.id: s.name
+            for s in (db.query(Spot).filter(Spot.id.in_(location_ids)).all() if location_ids else [])
+        }
+
+    def apply(self, m: Marker) -> dict:
+        return {
+            "floor_number": self.floors.get(m.floor_id),
+            "parent_label": self.units.get(m.parent_location_id) or self.rooms.get(m.parent_location_id),
+            "location_label": self.rooms.get(m.location_id) or self.spots.get(m.location_id),
+        }
+
+
+def _marker_out(m: Optional[Marker], labels: Optional[_LocationLabels] = None) -> Optional[dict]:
     if not m:
         return None
-    return {
+    out = {
         "id": m.id, "project_id": m.project_id, "marker_type": m.marker_type,
         "space": m.space, "u": m.u, "v": m.v,
         "floor_id": m.floor_id, "parent_location_id": m.parent_location_id,
@@ -58,9 +100,14 @@ def _marker_out(m: Optional[Marker]) -> Optional[dict]:
         "origin_captured_at": m.origin_captured_at,
         "created_at": m.created_at,
     }
+    if labels:
+        out.update(labels.apply(m))
+    return out
 
 
-def _issue_out(i: Issue, db: Session) -> dict:
+def _issue_out(i: Issue, db: Session, labels: Optional[_LocationLabels] = None) -> dict:
+    if labels is None and i.marker:
+        labels = _LocationLabels([i.marker], db)
     assignee_ids = i.assignee_ids or []
     assignees = (
         db.query(User).filter(User.id.in_(assignee_ids)).all() if assignee_ids else []
@@ -76,7 +123,7 @@ def _issue_out(i: Issue, db: Session) -> dict:
         "created_by_user": _user_out(db.query(User).get(i.created_by)) if i.created_by else None,
         "created_at": i.created_at, "updated_at": i.updated_at,
         "resolved_at": i.resolved_at,
-        "marker": _marker_out(i.marker),
+        "marker": _marker_out(i.marker, labels),
         "comment_count": len(i.comments),
     }
 
@@ -101,37 +148,60 @@ def list_markers(
     q = db.query(Marker).filter(Marker.location_id == location_id)
     if marker_type:
         q = q.filter(Marker.marker_type == marker_type)
-    return [_marker_out(m) for m in q.order_by(Marker.created_at).all()]
+    rows = q.order_by(Marker.created_at).all()
+    labels = _LocationLabels(rows, db)
+    return [_marker_out(m, labels) for m in rows]
 
 
 # ── Issues ───────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=List[IssueOut])
 def list_issues(
-    location_id: Optional[str] = None,
     project_id: Optional[str] = None,
+    location_id: Optional[str] = None,
+    floor_id: Optional[str] = None,
+    parent_location_id: Optional[str] = None,
     status: Optional[IssueStatus] = None,
+    priority: Optional[IssuePriority] = None,
+    assignee_id: Optional[str] = None,
     q: Optional[str] = Query(None, description="Free-text search over title/description"),
     db: Session = Depends(get_db),
 ):
+    """Project-wide by default. `location_id` narrows to one spot, but the
+    viewer's issue list deliberately does NOT pass it — the list is the central
+    place to see and navigate to every issue in the project."""
     if not location_id and not project_id:
         raise HTTPException(400, "Pass either location_id or project_id")
 
     query = db.query(Issue)
-    if location_id:
-        # Location scoping goes through the marker — an issue with no marker
-        # isn't tied to a location, so it correctly doesn't appear here.
-        query = query.join(Marker, Issue.marker_id == Marker.id).filter(
-            Marker.location_id == location_id
-        )
+    # Any location-based filter goes through the marker — an issue with no
+    # marker isn't tied to a location, so it correctly drops out of those.
+    if location_id or floor_id or parent_location_id:
+        query = query.join(Marker, Issue.marker_id == Marker.id)
+        if location_id:
+            query = query.filter(Marker.location_id == location_id)
+        if floor_id:
+            query = query.filter(Marker.floor_id == floor_id)
+        if parent_location_id:
+            query = query.filter(Marker.parent_location_id == parent_location_id)
     if project_id:
         query = query.filter(Issue.project_id == project_id)
     if status:
         query = query.filter(Issue.status == status)
+    if priority:
+        query = query.filter(Issue.priority == priority)
     if q:
         like = f"%{q}%"
         query = query.filter(Issue.title.ilike(like) | Issue.description.ilike(like))
-    return [_issue_out(i, db) for i in query.order_by(Issue.created_at.desc()).all()]
+
+    rows = query.order_by(Issue.created_at.desc()).all()
+    # assignee_ids is a JSON list, so this one filters in Python rather than
+    # relying on JSON querying support that differs across MSSQL/SQLite.
+    if assignee_id:
+        rows = [i for i in rows if assignee_id in (i.assignee_ids or [])]
+
+    labels = _LocationLabels([i.marker for i in rows if i.marker], db)
+    return [_issue_out(i, db, labels) for i in rows]
 
 
 @router.post("", response_model=IssueOut, status_code=201)
