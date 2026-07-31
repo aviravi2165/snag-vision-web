@@ -93,7 +93,6 @@ export const updateIssue = (id, data) => api.patch(`/issues/${id}`, data)
 export const deleteIssue = (id) => api.delete(`/issues/${id}`)
 export const getIssueComments = (id) => api.get(`/issues/${id}/comments`)
 export const addIssueComment = (id, body) => api.post(`/issues/${id}/comments`, { body })
-export const getIssueTags = (projectId) => api.get('/issues/tags', { params: { project_id: projectId } })
 
 // ─── Site (Layout Setup / Site Capture / Panorama persistence) ──────────────
 export const createSiteProject = (data) => api.post('/site/projects', data)

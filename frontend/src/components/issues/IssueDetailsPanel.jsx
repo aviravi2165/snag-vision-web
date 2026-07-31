@@ -103,21 +103,6 @@ export default function IssueDetailsPanel({
         </div>
       </div>
 
-      <Field label="Tags">
-        {issue.tags?.length
-          ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {issue.tags.map(t => (
-                <span key={t} style={{
-                  fontSize: 11, padding: '3px 8px', borderRadius: 20,
-                  background: 'var(--amber-glow)', border: '1px solid var(--amber-dim)', color: 'var(--amber)',
-                }}>{t}</span>
-              ))}
-            </div>
-          )
-          : <Muted>—</Muted>}
-      </Field>
-
       <Field label="Assignees">
         {issue.assignees?.length
           ? (

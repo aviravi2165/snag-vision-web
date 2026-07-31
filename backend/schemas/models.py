@@ -256,7 +256,6 @@ class IssueCreate(BaseModel):
     description: Optional[str] = None
     priority: IssuePriority = IssuePriority.medium
     due_date: Optional[datetime] = None
-    tags: List[str] = []
     assignee_ids: List[str] = []
     marker: Optional[MarkerIn] = None   # created atomically with the issue
 
@@ -268,7 +267,6 @@ class IssueUpdate(BaseModel):
     priority: Optional[IssuePriority] = None
     status: Optional[IssueStatus] = None
     due_date: Optional[datetime] = None
-    tags: Optional[List[str]] = None
     assignee_ids: Optional[List[str]] = None
 
 
@@ -293,7 +291,6 @@ class IssueOut(BaseModel):
     priority: IssuePriority
     status: IssueStatus
     due_date: Optional[datetime] = None
-    tags: List[str] = []
     assignee_ids: List[str] = []
     assignees: List[Dict[str, Any]] = []   # resolved {id,name,email} for display
     created_by: Optional[str] = None

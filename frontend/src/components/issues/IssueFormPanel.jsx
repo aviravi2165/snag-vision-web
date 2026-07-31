@@ -5,14 +5,14 @@
  */
 import { useState } from 'react'
 import toast from 'react-hot-toast'
-import { TagInput, AssigneePicker } from './IssueBits'
+import { AssigneePicker } from './IssueBits'
 
 const PRIORITIES = ['high', 'medium', 'low']
 
-export default function IssueFormPanel({ users, tagSuggestions, onSubmit, onCancel }) {
+export default function IssueFormPanel({ users, onSubmit, onCancel }) {
   const [form, setForm] = useState({
     title: '', description: '', priority: 'medium', due_date: '',
-    tags: [], assignee_ids: [],
+    assignee_ids: [],
   })
   const [saving, setSaving] = useState(false)
 
@@ -49,12 +49,6 @@ export default function IssueFormPanel({ users, tagSuggestions, onSubmit, onCanc
         <textarea rows={3} style={{ resize: 'none' }}
           placeholder="What exactly is wrong? Any context the assignee needs…"
           value={form.description} onChange={e => set({ description: e.target.value })} />
-      </div>
-
-      <div>
-        <label className="label">Tags</label>
-        <TagInput value={form.tags} suggestions={tagSuggestions}
-          onChange={tags => set({ tags })} />
       </div>
 
       <div>

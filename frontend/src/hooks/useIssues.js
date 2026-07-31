@@ -10,14 +10,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   getIssues, createIssue, updateIssue, deleteIssue,
-  getIssueComments, addIssueComment, getIssueTags, getUsers,
+  getIssueComments, addIssueComment, getUsers,
 } from '../utils/api'
 
 export default function useIssues(projectId, locationId) {
   const [issues, setIssues] = useState([])
   const [loading, setLoading] = useState(false)
   const [users, setUsers] = useState([])
-  const [tags, setTags] = useState([])
 
   const reload = useCallback(async () => {
     if (!locationId) { setIssues([]); return }
@@ -34,22 +33,14 @@ export default function useIssues(projectId, locationId) {
 
   useEffect(() => { reload() }, [reload])
 
-  // Assignee directory + existing tag vocabulary — only needed once per project
+  // Assignee directory for the "Assign users" picker
   useEffect(() => {
     getUsers().then(({ data }) => setUsers(data)).catch(() => setUsers([]))
   }, [])
 
-  useEffect(() => {
-    if (!projectId) { setTags([]); return }
-    getIssueTags(projectId).then(({ data }) => setTags(data)).catch(() => setTags([]))
-  }, [projectId])
-
   const create = useCallback(async (payload) => {
     const { data } = await createIssue(payload)
     setIssues(prev => [data, ...prev])
-    if (payload.tags?.length) {
-      setTags(prev => [...new Set([...prev, ...payload.tags])].sort())
-    }
     return data
   }, [])
 
@@ -67,5 +58,5 @@ export default function useIssues(projectId, locationId) {
   const comments = useCallback((id) => getIssueComments(id).then(r => r.data), [])
   const comment = useCallback((id, body) => addIssueComment(id, body).then(r => r.data), [])
 
-  return { issues, loading, users, tags, reload, create, update, remove, comments, comment }
+  return { issues, loading, users, reload, create, update, remove, comments, comment }
 }

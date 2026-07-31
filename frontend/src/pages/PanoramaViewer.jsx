@@ -493,7 +493,7 @@ function FilterPanel({
   // Scoped to the selected Spot (roomId): markers are anchored to the location,
   // so they stay put when the user flips between capture dates.
   const issuesApi = useIssues(projectId, roomId)
-  const { issues, loading: issuesLoading, users, tags } = issuesApi
+  const { issues, loading: issuesLoading, users } = issuesApi
 
   const [pending, setPending] = useState(null)      // {u,v} placed but unsaved
   const [selectedId, setSelectedId] = useState(null) // highlighted marker
@@ -724,7 +724,7 @@ function FilterPanel({
         >
           {mine?.mode === 'create' && (
             <IssueFormPanel
-              users={users} tagSuggestions={tags}
+              users={users}
               onSubmit={submitIssue}
               onCancel={() => { resetPlacement(); closeDrawer() }}
             />

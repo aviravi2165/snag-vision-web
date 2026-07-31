@@ -3,8 +3,6 @@
  * Kept together so the three panels stay presentational and consistent, and
  * so status/priority styling is defined exactly once.
  */
-import { useState } from 'react'
-
 export const STATUSES = ['open', 'in_progress', 'resolved', 'closed']
 
 export const STATUS_LABEL = {
@@ -45,61 +43,6 @@ export function formatDate(value) {
   return new Date(value).toLocaleDateString(undefined, {
     day: 'numeric', month: 'short', year: 'numeric',
   })
-}
-
-/** Type-to-search-or-create tag input. `suggestions` is the project's existing vocabulary. */
-export function TagInput({ value = [], suggestions = [], onChange }) {
-  const [text, setText] = useState('')
-  const add = (tag) => {
-    const t = tag.trim().toLowerCase()
-    if (!t || value.includes(t)) { setText(''); return }
-    onChange([...value, t])
-    setText('')
-  }
-  const matches = text
-    ? suggestions.filter(s => s.includes(text.toLowerCase()) && !value.includes(s)).slice(0, 5)
-    : []
-
-  return (
-    <div>
-      <input
-        placeholder="Type to search or create tags"
-        value={text}
-        onChange={e => setText(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); add(text) }
-          if (e.key === 'Backspace' && !text && value.length) onChange(value.slice(0, -1))
-        }}
-      />
-      {matches.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-          {matches.map(s => (
-            <button key={s} type="button" onClick={() => add(s)} style={{
-              fontSize: 11, padding: '3px 8px', borderRadius: 20, cursor: 'pointer',
-              background: 'var(--bg-hover)', border: '1px solid var(--border)', color: 'var(--text-2)',
-            }}>+ {s}</button>
-          ))}
-        </div>
-      )}
-      {value.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-          {value.map(t => (
-            <span key={t} style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              fontSize: 11, padding: '3px 8px', borderRadius: 20,
-              background: 'var(--amber-glow)', border: '1px solid var(--amber-dim)', color: 'var(--amber)',
-            }}>
-              {t}
-              <button type="button" onClick={() => onChange(value.filter(x => x !== t))} style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--amber)', fontSize: 12, lineHeight: 1, padding: 0,
-              }}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 /** Multi-select user picker backed by GET /auth/users. */

@@ -70,7 +70,6 @@ def _issue_out(i: Issue, db: Session) -> dict:
         "title": i.title, "description": i.description,
         "priority": i.priority, "status": i.status,
         "due_date": i.due_date,
-        "tags": i.tags or [],
         "assignee_ids": assignee_ids,
         "assignees": [_user_out(u) for u in assignees],
         "created_by": i.created_by,
@@ -169,26 +168,13 @@ def create_issue(data: IssueCreate, db: Session = Depends(get_db),
         title=data.title, description=data.description,
         priority=data.priority, status=IssueStatus.open,
         due_date=data.due_date,
-        tags=data.tags or [], assignee_ids=data.assignee_ids or [],
+        assignee_ids=data.assignee_ids or [],
         created_by=user.id,
     )
     db.add(issue)
     db.commit()
     db.refresh(issue)
     return _issue_out(issue, db)
-
-
-@router.get("/tags", response_model=List[str])
-def list_tags(project_id: str, db: Session = Depends(get_db)):
-    """Tag vocabulary already in use on this project — backs the
-    "type to search or create" tag input. Declared above /{issue_id} so the
-    literal path wins the route match."""
-    rows = db.query(Issue.tags).filter(Issue.project_id == project_id).all()
-    seen = set()
-    for (tags,) in rows:
-        for t in (tags or []):
-            seen.add(t)
-    return sorted(seen)
 
 
 @router.get("/{issue_id}", response_model=IssueOut)

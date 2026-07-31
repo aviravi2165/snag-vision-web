@@ -404,10 +404,9 @@ class Issue(Base):
     priority = Column(Enum(IssuePriority), default=IssuePriority.medium)
     status = Column(Enum(IssueStatus), default=IssueStatus.open)
     due_date = Column(DateTime, nullable=True)
-    # JSON lists rather than join tables — consistent with this codebase's
+    # JSON list rather than a join table — consistent with this codebase's
     # existing use of JSON columns (site_floors, activity_plan, unit_col_map)
     # and keeps this trial feature to three droppable tables.
-    tags = Column(JSON, nullable=True)           # list[str]
     assignee_ids = Column(JSON, nullable=True)   # list[user id]
     created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

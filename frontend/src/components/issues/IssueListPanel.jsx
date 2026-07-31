@@ -18,8 +18,7 @@ export default function IssueListPanel({ issues, loading, currentUploadId, onSel
       if (!q) return true
       return (
         i.title.toLowerCase().includes(q) ||
-        (i.description || '').toLowerCase().includes(q) ||
-        (i.tags || []).some(t => t.includes(q))
+        (i.description || '').toLowerCase().includes(q)
       )
     })
   }, [issues, query, status])
