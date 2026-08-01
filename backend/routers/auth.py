@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
+from typing import List
 from models import get_db
 from models.database import User, UserRole
 from schemas.models import UserCreate, UserOut, Token, LoginIn
@@ -80,3 +81,11 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     if not user or not verify_pw(data.password, user.hashed_password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     return Token(access_token=create_token(user.id), user=UserOut.model_validate(user))
+
+
+@router.get("/users", response_model=List[UserOut])
+def list_users(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Directory of users who can be assigned work — backs the Issue
+    "Assign Users" picker (routers/issues.py). Login-gated; returns only the
+    public UserOut fields (never the password hash)."""
+    return db.query(User).order_by(User.name).all()

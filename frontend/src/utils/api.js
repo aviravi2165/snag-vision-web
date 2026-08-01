@@ -79,6 +79,21 @@ export const getRoomUploads = (roomId) => api.get(`/uploads/room/${roomId}`)
 export const getRoomAnalysis = (roomId) => api.get(`/analysis/room/${roomId}/latest`)
 export const getChangeDetection = (roomId) => api.get(`/analysis/room/${roomId}/change-detection`)
 
+// ─── Markers + Issue Management (Site Photo Viewer) ─────────────────────────
+// Markers are anchored to a location (the Spot/sub-Room the viewer resolves
+// to), not to one capture — so they reappear on later captures of that same
+// spot. See backend/routers/issues.py.
+export const getUsers = () => api.get('/auth/users')
+export const getMarkers = (locationId, markerType) =>
+  api.get('/markers', { params: { location_id: locationId, marker_type: markerType } })
+export const getIssues = (params) => api.get('/issues', { params })
+export const createIssue = (data) => api.post('/issues', data)
+export const getIssue = (id) => api.get(`/issues/${id}`)
+export const updateIssue = (id, data) => api.patch(`/issues/${id}`, data)
+export const deleteIssue = (id) => api.delete(`/issues/${id}`)
+export const getIssueComments = (id) => api.get(`/issues/${id}/comments`)
+export const addIssueComment = (id, body) => api.post(`/issues/${id}/comments`, { body })
+
 // ─── Site (Layout Setup / Site Capture / Panorama persistence) ──────────────
 export const createSiteProject = (data) => api.post('/site/projects', data)
 export const getSiteProjects = () => api.get('/site/projects')
