@@ -5,22 +5,22 @@ export default {
     extend: {
       colors: {
         // Primary accent
-        accent:      '#D32F2F',
-        'accent-dk': '#B71C1C',
-        'accent-lt': '#FFEBEE',
+        accent:      '#2F6FED',
+        'accent-dk': '#1F5FD5',
+        'accent-lt': '#EAF2FF',
 
         // Neutrals
-        charcoal: '#111111',
-        'gray-muted': '#666666',
+        charcoal: '#13264B',
+        'gray-muted': '#64748B',
 
         // Surface
-        'bg-base':    '#F8F7F4',
+        'bg-base':    '#F7F9FC',
         'bg-surface': '#FFFFFF',
-        'bg-hover':   '#F3F2EF',
+        'bg-hover':   '#F1F5FB',
 
         // Borders
-        border:       '#E5E5E5',
-        'border-dim': '#EBEAE6',
+        border:       '#E3EAF3',
+        'border-dim': '#EDF1F6',
       },
       fontFamily: {
         sans:    ['Inter', 'system-ui', 'sans-serif'],

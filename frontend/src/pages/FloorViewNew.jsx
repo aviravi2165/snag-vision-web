@@ -26,11 +26,11 @@ import { Panorama360 } from './PanoramaViewer'
 
 // ─── Completion bands (mirrors the 5-state legend) ─────────────────────────
 const BANDS = [
-  { max: 0.01, label: 'Not started',        bg: '#F3F4F6', border: '#D1D5DB', text: '#374151' },
-  { max: 25,   label: 'Bare shell',         bg: '#FCE7E9', border: '#F3B4BC', text: '#B91C3C' },
-  { max: 60,   label: 'Services & build-up', bg: '#FDEBD3', border: '#F5C083', text: '#B45309' },
-  { max: 90,   label: 'Finishing works',    bg: '#FEF6C7', border: '#F3DE72', text: '#92730B' },
-  { max: 101,  label: 'Near completion',    bg: '#DCFCE7', border: '#86EFAC', text: '#15803D' },
+  { max: 0.01, label: 'Not started',        bg: '#F1F5FB', border: '#CBD7E6', text: '#64748B' },
+  { max: 25,   label: 'Bare shell',         bg: '#EAF2FF', border: '#BFD5FF', text: '#2F6FED' },
+  { max: 60,   label: 'Services & build-up', bg: '#EAF7F8', border: '#BCE4E8', text: '#2D879B' },
+  { max: 90,   label: 'Finishing works',    bg: '#F2EDFF', border: '#D7C8FF', text: '#7655C8' },
+  { max: 101,  label: 'Near completion',    bg: '#EAF7F2', border: '#BCE7DC', text: '#16856F' },
 ]
 function bandFor(pct) {
   if (pct === null || pct === undefined) return BANDS[0]
@@ -42,9 +42,9 @@ function toLabel(key) {
 
 // ─── KPI grid coloring (Floor tile + Room ID tiles): 3 simple bands ─────────
 const KPI_BANDS = [
-  { max: 40,  label: '< 40%',   bg: '#FDEBD3', border: '#F5C083', text: '#92400E' }, // light orange
-  { max: 75,  label: '40–75%',  bg: '#FEF6C7', border: '#F3DE72', text: '#92730B' }, // yellow
-  { max: 101, label: '> 75%',   bg: '#DCFCE7', border: '#86EFAC', text: '#15803D' }, // green
+  { max: 40,  label: '< 40%',   bg: '#EAF2FF', border: '#BFD5FF', text: '#2F6FED' },
+  { max: 75,  label: '40–75%',  bg: '#F2EDFF', border: '#D7C8FF', text: '#7655C8' },
+  { max: 101, label: '> 75%',   bg: '#EAF7F2', border: '#BCE7DC', text: '#16856F' },
 ]
 function kpiColor(pct) {
   if (pct === null || pct === undefined) return KPI_BANDS[0]
@@ -52,10 +52,10 @@ function kpiColor(pct) {
 }
 // Vivid bar-fill color (the band's muted `text` color reads as mustard on a progress bar)
 function barColor(pct) {
-  if (pct === null || pct === undefined) return '#F97316'
-  if (pct < 40) return '#F97316'   // orange
-  if (pct < 75) return '#F5A623'  // amber/gold
-  return '#22C55E'                 // green
+  if (pct === null || pct === undefined) return '#94A3B8'
+  if (pct < 40) return '#2F6FED'
+  if (pct < 75) return '#7655C8'
+  return '#16856F'
 }
 
 // Pick the history entry that was current as of `dateKey` (or the latest if dateKey is null)
@@ -258,13 +258,13 @@ export default function FloorViewNew() {
               VESTIGIA AI Progress
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-              <div style={{ flex: 1, background: 'var(--bg-hover)', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ flex: 1, background: '#EAF2FF', borderRadius: 8, padding: '8px 10px' }}>
                 <div style={{ fontSize: 10, color: 'var(--text-3)' }}>OVERALL PROGRESS</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>
                   {floorAvg === null ? '—' : `${Math.round(floorAvg)}%`}
                 </div>
               </div>
-              <div style={{ flex: 1, background: 'var(--bg-hover)', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ flex: 1, background: '#EAF2FF', borderRadius: 8, padding: '8px 10px' }}>
                 <div style={{ fontSize: 10, color: 'var(--text-3)' }}>ROOMS CAPTURED</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>{capturedRooms}/{totalRooms}</div>
               </div>
@@ -323,14 +323,14 @@ export default function FloorViewNew() {
                   <div style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                     padding: '12px 8px', borderRadius: 10, position: 'relative',
-                    background: kpiColor(floorAvg).bg, border: `1.5px solid ${kpiColor(floorAvg).border}`,
+                    background: '#EAF2FF', border: '1.5px solid #BFD5FF',
                   }}>
                     {floorAlert && (
                       <span style={{ position: 'absolute', top: 6, right: 8, width: 7, height: 7,
-                        borderRadius: '50%', background: '#EF4444' }} />
+                        borderRadius: '50%', background: '#D96A32' }} />
                     )}
-                    <span style={{ fontSize: 11, color: kpiColor(floorAvg).text }}>Floor {selectedFloorObj?.floor_number}</span>
-                    <span style={{ fontSize: 18, fontWeight: 700, fontFamily: 'Space Grotesk', color: kpiColor(floorAvg).text }}>
+                    <span style={{ fontSize: 11, color: '#111111' }}>Floor {selectedFloorObj?.floor_number}</span>
+                    <span style={{ fontSize: 18, fontWeight: 700, fontFamily: 'Space Grotesk', color: '#111111' }}>
                       {floorAvg === null ? '—' : `${Math.round(floorAvg)}%`}
                     </span>
                   </div>
@@ -344,15 +344,15 @@ export default function FloorViewNew() {
                       <button key={entry.unit.id} onClick={() => setSelectedUnitId(entry.unit.id)} style={{
                         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                         padding: '12px 8px', borderRadius: 10, cursor: 'pointer',
-                        background: band.bg, border: `1.5px solid ${isActive ? 'var(--amber)' : band.border}`,
+                        background: '#EAF2FF', border: `1.5px solid ${isActive ? 'var(--accent)' : '#BFD5FF'}`,
                         boxShadow: isActive ? '0 0 0 1px var(--amber)' : 'none',
                       }}>
-                        <span style={{ fontSize: 11, color: band.text }}>{entry.unit.unit_number}</span>
-                        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'Space Grotesk', color: band.text }}>
+                        <span style={{ fontSize: 11, color: '#111111' }}>{entry.unit.unit_number}</span>
+                        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'Space Grotesk', color: '#111111' }}>
                           {val === null ? '—' : `${Math.round(val)}%`}
                         </span>
                         {delta !== null && (
-                          <span style={{ fontSize: 10, color: delta >= 0 ? '#15803D' : '#B91C3C' }}>
+                          <span style={{ fontSize: 10, color: '#111111' }}>
                             {delta >= 0 ? '▲' : '▼'}{Math.abs(delta).toFixed(0)}
                           </span>
                         )}
@@ -380,16 +380,16 @@ export default function FloorViewNew() {
             const flatDelta = unitDelta(selectedEntry)
             return (
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                <div style={{ background: '#111827', color: '#fff', padding: '10px 14px',
+                <div style={{ background: '#13264B', color: '#fff', padding: '10px 14px',
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: 13, fontWeight: 600 }}>
                     📍 Flat Summary — {selectedEntry.unit.unit_number}
                   </span>
                   <span style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ color: '#9CA3AF' }}>PROGRESS</span>
+                    <span style={{ color: '#B9C7DA' }}>PROGRESS</span>
                     <strong>{flatVal === null ? '—' : `${Math.round(flatVal)}%`}</strong>
                     {flatDelta !== null && (
-                      <span style={{ color: flatDelta >= 0 ? '#4ADE80' : '#F87171' }}>
+                      <span style={{ color: flatDelta >= 0 ? '#65C9B4' : '#F29A70' }}>
                         {flatDelta >= 0 ? '▲' : '▼'} {Math.abs(flatDelta).toFixed(1)}%
                       </span>
                     )}
@@ -413,7 +413,7 @@ export default function FloorViewNew() {
                         }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                             <strong style={{ fontSize: 13 }}>{room.name}</strong>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: '#111111' }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>
                               {pct === null ? '—' : `${Math.round(pct)}%`}
                             </span>
                           </div>
@@ -463,16 +463,16 @@ export default function FloorViewNew() {
               </div>
 
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                <div style={{ background: '#111827', color: '#fff', padding: '10px 14px',
+                <div style={{ background: '#13264B', color: '#fff', padding: '10px 14px',
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: 13, fontWeight: 600 }}>
                     📍 Point Summary — {selectedEntry.unit.unit_number}_{focusedEntry.room.name}
                   </span>
                   <span style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ color: '#9CA3AF' }}>PROGRESS</span>
+                    <span style={{ color: '#B9C7DA' }}>PROGRESS</span>
                     <strong>{focusedValue?.pct === null || focusedValue?.pct === undefined ? '—' : `${Math.round(focusedValue.pct)}%`}</strong>
                     {typeof focusedValue?.delta === 'number' && (
-                      <span style={{ color: focusedValue.delta >= 0 ? '#4ADE80' : '#F87171' }}>
+                      <span style={{ color: focusedValue.delta >= 0 ? '#65C9B4' : '#F29A70' }}>
                         {focusedValue.delta >= 0 ? '▲' : '▼'} {Math.abs(focusedValue.delta).toFixed(1)}%
                       </span>
                     )}

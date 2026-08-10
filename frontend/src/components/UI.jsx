@@ -3,13 +3,13 @@ export function ProgressRing({ pct, size = 72, strokeWidth = 5, label }) {
   const r      = (size - strokeWidth * 2) / 2
   const circ   = 2 * Math.PI * r
   const offset = circ - (pct / 100) * circ
-  const color  = pct >= 80 ? '#2E7D32' : pct >= 50 ? '#E65100' : '#C62828'
+  const color  = pct >= 80 ? '#16856F' : pct >= 50 ? '#2F6FED' : '#D96A32'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
         <circle cx={size/2} cy={size/2} r={r} fill="none"
-          stroke="#EBEBEB" strokeWidth={strokeWidth} />
+          stroke="#E3EAF3" strokeWidth={strokeWidth} />
         <circle cx={size/2} cy={size/2} r={r} fill="none"
           stroke={color} strokeWidth={strokeWidth}
           strokeLinecap="round"
@@ -19,7 +19,7 @@ export function ProgressRing({ pct, size = 72, strokeWidth = 5, label }) {
         />
         <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle"
           style={{ transform: 'rotate(90deg)', transformOrigin: '50% 50%',
-            fill: '#111111', fontSize: size * 0.22, fontWeight: 600,
+            fill: '#13264B', fontSize: size * 0.22, fontWeight: 600,
             fontFamily: 'Space Grotesk, sans-serif' }}>
           {Math.round(pct)}%
         </text>
@@ -33,9 +33,9 @@ export function ProgressRing({ pct, size = 72, strokeWidth = 5, label }) {
 
 // ─── Progress Bar ─────────────────────────────────────────────────────────────
 export function ProgressBar({ pct, height = 5, className = '' }) {
-  const color = pct >= 80 ? '#2E7D32' : pct >= 50 ? '#E65100' : '#C62828'
+  const color = pct >= 80 ? '#16856F' : pct >= 50 ? '#2F6FED' : '#D96A32'
   return (
-    <div style={{ height, background: '#EBEBEB', borderRadius: height, overflow: 'hidden' }}
+    <div style={{ height, background: '#E3EAF3', borderRadius: height, overflow: 'hidden' }}
       className={className}>
       <div style={{
         height: '100%', width: `${pct}%`, background: color,
@@ -58,8 +58,8 @@ export function StatusBadge({ pct, flag }) {
 export function MetricCard({ label, value, sub, subColor, icon, accent }) {
   return (
     <div className="card-sm" style={{
-      borderColor: accent ? '#FFCDD2' : undefined,
-      borderLeft:  accent ? '3px solid #D32F2F' : undefined,
+      borderColor: accent ? '#BFD5FF' : undefined,
+      borderLeft:  accent ? '3px solid #2F6FED' : undefined,
     }}>
       <div style={{ fontSize: 11, color: '#999999', marginBottom: 10,
         textTransform: 'uppercase', letterSpacing: '.07em',
@@ -68,7 +68,7 @@ export function MetricCard({ label, value, sub, subColor, icon, accent }) {
       </div>
       <div style={{
         fontSize: 26, fontWeight: 700, fontFamily: 'Space Grotesk, sans-serif',
-        color: accent ? '#D32F2F' : '#111111', lineHeight: 1,
+        color: accent ? '#2F6FED' : '#13264B', lineHeight: 1,
       }}>
         {value}
       </div>
