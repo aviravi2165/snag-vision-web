@@ -94,6 +94,21 @@ export const deleteIssue = (id) => api.delete(`/issues/${id}`)
 export const getIssueComments = (id) => api.get(`/issues/${id}/comments`)
 export const addIssueComment = (id, body) => api.post(`/issues/${id}/comments`, { body })
 
+// ─── Walkthroughs (capture sessions — the numbered rounds behind the unified
+// media pipeline). Exposed everywhere as "Walkthrough"; the backend table is
+// the generic CaptureSession. See backend/services/walkthrough_service.py.
+export const getWalkthroughs = (projectId) => api.get(`/projects/${projectId}/walkthroughs`)
+export const createWalkthrough = (projectId) => api.post(`/projects/${projectId}/walkthroughs`)
+export const getCurrentWalkthrough = (projectId) => api.get(`/projects/${projectId}/walkthroughs/current`)
+export const requestCompleteWalkthrough = (walkthroughId) =>
+  api.post(`/walkthroughs/${walkthroughId}/request-complete`)
+export const completeWalkthrough = (walkthroughId) =>
+  api.post(`/walkthroughs/${walkthroughId}/complete`)
+
+// Media Manager — every capture for a project, grouped by walkthrough, each
+// group carrying its summary row (Total / Pending AI / Done / Failed).
+export const getProjectUploads = (projectId) => api.get(`/uploads/project/${projectId}`)
+
 // ─── Site (Layout Setup / Site Capture / Panorama persistence) ──────────────
 export const createSiteProject = (data) => api.post('/site/projects', data)
 export const getSiteProjects = () => api.get('/site/projects')
@@ -113,5 +128,6 @@ export const deleteHotspotApi = (hotspotId) => api.delete(`/site/hotspots/${hots
 export const captureHotspotApi = (hotspotId, formData) =>
   api.post(`/site/hotspots/${hotspotId}/capture`, formData,
     { headers: { 'Content-Type': 'multipart/form-data' } })
-export const getHotspotCaptureApi = (hotspotId) => api.get(`/site/hotspots/${hotspotId}/capture`)
+export const getHotspotCaptureApi = (hotspotId, params) =>
+  api.get(`/site/hotspots/${hotspotId}/capture`, { params })
 export const deleteHotspotCaptureApi = (hotspotId) => api.delete(`/site/hotspots/${hotspotId}/capture`)

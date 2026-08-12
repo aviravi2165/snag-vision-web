@@ -3,6 +3,7 @@ import { getFloors, getUnits, getRooms, getRoomAnalysis, getChangeDetection } fr
 import { useProject } from '../hooks/useProject'   // ← global project context
 import { Spinner, ProgressBar, StatusBadge, ProgressRing, Empty, SectionTitle } from '../components/UI'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
+import { STANDARD_ACTIVITIES } from '../utils/standardActivities'
 
 const CT = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
@@ -71,11 +72,16 @@ export default function AnalysisPage() {
       .finally(() => setLoading(false))
   }, [selRoom])
 
-  const components = analysis?.components || {}
-  const radarData  = Object.entries(components).map(([k, v]) => ({
-    s: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-    v: Math.round(v),
-  }))
+  // Mapped breakdown: raw Gemini components rolled into the STANDARD
+  // 12-category catalog server-side (the `mapped` field). Always render the
+  // full standard list — categories with no evidence show '—', raw component
+  // keys are never displayed.
+  const mapped = analysis?.mapped || []
+  const mappedByName = Object.fromEntries(mapped.map(m => [m.name, m.pct]))
+  const activityList = STANDARD_ACTIVITIES.map(name => ({ name, pct: mappedByName[name] ?? null }))
+  const radarData  = activityList
+    .filter(a => a.pct !== null)
+    .map(({ name, pct }) => ({ s: name, v: Math.round(pct) }))
   const histChart = history.map((h, i) => ({ visit: `V${i + 1}`, pct: Math.round(h.overall_pct) }))
 
   // Labels for breadcrumb
@@ -159,13 +165,15 @@ export default function AnalysisPage() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {Object.entries(components).map(([k, v]) => (
-                  <div key={k}>
+                {activityList.map(({ name, pct }) => (
+                  <div key={name}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                      <span style={{ fontSize: 12, color: 'var(--text-2)', textTransform: 'capitalize' }}>{k.replace(/_/g, ' ')}</span>
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{Math.round(v)}%</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-2)', textTransform: 'capitalize' }}>{name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>
+                        {pct === null ? '—' : `${Math.round(pct)}%`}
+                      </span>
                     </div>
-                    <ProgressBar pct={v} height={4} />
+                    <ProgressBar pct={pct || 0} height={4} />
                   </div>
                 ))}
               </div>

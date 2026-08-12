@@ -15,6 +15,7 @@ from services.progress_service import build_dashboard
 from services.gcs_service import upload_media, download_media
 from services.excel_service import parse_activity_excel, match_unit_columns
 from services.mapping_service import generate_ai_mapping
+from services.activity_catalog import STANDARD_ACTIVITIES, refresh_standard_classification
 from routers.auth import get_current_user, require_role
 from typing import List
 
@@ -145,6 +146,28 @@ def set_activities(project_id: str, data: ActivityPlanIn, db: Session = Depends(
     p.activity_plan = None  # legacy JSON is no longer authoritative once Activity rows exist
     db.commit()
     return get_activities(project_id, db)
+
+
+@router.post("/{project_id}/activities/standard")
+async def refresh_standard_classification_endpoint(project_id: str, db: Session = Depends(get_db)):
+    """Extend the GLOBAL standard 12-category classifier with every component
+    key Gemini has actually observed in this project's photos. Does NOT touch
+    the project's own Activity plan — that stays the Activity-Excel BoQ view
+    the Executive dashboard reads. Floor View / AI Analysis render through
+    this global classifier (services/activity_catalog.py), so new photos with
+    new component keys just need this call once. Re-runnable and idempotent
+    (unknown keys only get added)."""
+    p = db.query(Project).get(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+
+    result = await refresh_standard_classification(db)
+
+    return {
+        "categories": STANDARD_ACTIVITIES,
+        "total_categories": len(STANDARD_ACTIVITIES),
+        **result,
+    }
 
 
 # ── Activity Excel (master progress sheet) ───────────────────────────────────

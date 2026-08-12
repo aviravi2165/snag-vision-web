@@ -4,6 +4,7 @@ import { getFloors, getUnits, getRooms, getRoomAnalysis } from '../utils/api'
 import { useProject } from '../hooks/useProject'
 import { Spinner, ProgressBar, StatusBadge, ProgressRing, SectionTitle, Empty } from '../components/UI'
 import FloorViewNew from './FloorViewNew'
+import { STANDARD_ACTIVITIES } from '../utils/standardActivities'
 
 const NEW_FLOORVIEW_KEY = 'vestigia_new_floorview_enabled'
 
@@ -78,6 +79,15 @@ function FloorViewClassic() {
 
   const activeRoom     = rooms.find(r => r.id === selectedRoom)
   const activeAnalysis = selectedRoom ? roomData[selectedRoom] : null
+
+  // Activity breakdown for the selected room — always the STANDARD 12-category
+  // catalog (server-side `mapped` via the global classifier); categories with
+  // no evidence show '—'. Raw Gemini component keys are never displayed.
+  const activeItems = (() => {
+    const mapped = activeAnalysis?.mapped || []
+    const byName = Object.fromEntries(mapped.map(m => [m.name, m.pct]))
+    return STANDARD_ACTIVITIES.map(name => ({ name, pct: byName[name] ?? null }))
+  })()
 
   return (
     <div style={{ padding: '28px', maxWidth: 1100 }}>
@@ -186,22 +196,22 @@ function FloorViewClassic() {
                   <ProgressRing pct={Math.round(activeRoom.progress_pct || 0)} size={60} strokeWidth={5} />
                 </div>
 
-                {activeAnalysis?.components && Object.entries(activeAnalysis.components).length > 0 ? (
+                {activeItems.length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {Object.entries(activeAnalysis.components).map(([k, v]) => (
-                      <div key={k}>
+                    {activeItems.map(({ name, pct }) => (
+                      <div key={name}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                           <span style={{ fontSize: 11, color: 'var(--text-2)', textTransform: 'capitalize' }}>
-                            {k.replace(/_/g, ' ')}
+                            {name}
                           </span>
                           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>
-                            {Math.round(v)}%
+                            {pct === null ? '—' : `${Math.round(pct)}%`}
                           </span>
                         </div>
-                        <ProgressBar pct={v} height={3} />
+                        <ProgressBar pct={pct || 0} height={3} />
                       </div>
                     ))}
-                    {activeAnalysis.ai_notes && (
+                    {activeAnalysis?.ai_notes && (
                       <div style={{
                         marginTop: 6, padding: '8px 10px',
                         background: 'var(--bg-hover)', borderRadius: 8,

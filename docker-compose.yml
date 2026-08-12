@@ -49,7 +49,14 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    command: npm run dev -- --host
+    # CHOKIDAR_USEPOLLING: Docker Desktop on Windows often misses bind-mount
+    # file events, so Vite silently keeps serving STALE transformed modules
+    # after a source edit (changes appear only after a container restart).
+    # Polling makes hot-reload reliable; --force clears the dep-optimizer
+    # cache on every start so a stale transform can never linger.
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+    command: npm run dev -- --host --force
     depends_on:
       - backend
 

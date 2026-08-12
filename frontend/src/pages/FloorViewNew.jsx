@@ -23,6 +23,7 @@ import {
 } from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
 import { Panorama360 } from './PanoramaViewer'
+import { STANDARD_ACTIVITIES } from '../utils/standardActivities'
 
 // ─── Completion bands (mirrors the 5-state legend) ─────────────────────────
 const BANDS = [
@@ -35,9 +36,6 @@ const BANDS = [
 function bandFor(pct) {
   if (pct === null || pct === undefined) return BANDS[0]
   return BANDS.find(b => pct <= b.max) || BANDS[BANDS.length - 1]
-}
-function toLabel(key) {
-  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 // ─── KPI grid coloring (Floor tile + Room ID tiles): 3 simple bands ─────────
@@ -137,22 +135,21 @@ export default function FloorViewNew() {
     return [...set].sort((a, b) => b.localeCompare(a))
   }, [units])
 
-  // ── Categories: "Overall" + every component key seen across this floor ──
-  const categories = useMemo(() => {
-    const keys = new Set()
-    units.forEach(({ rooms }) => rooms.forEach(({ history }) => {
-      const at = historyAt(history, selectedDate)
-      Object.keys(at?.components || {}).forEach(k => keys.add(k))
-    }))
-    return ['Overall', ...[...keys].sort()]
-  }, [units, selectedDate])
+  // ── Categories: "Overall" + the standard 12-category catalog (the fixed
+  // list Floor View / AI Analysis render — see utils/standardActivities.js).
+  // NOT the project's Activity-Excel plan, which stays the Executive
+  // dashboard's BoQ view. ────────────────────────────────────────────────────
+  const categories = useMemo(
+    () => ['Overall', ...STANDARD_ACTIVITIES],
+    []
+  )
 
   const roomValueFor = useCallback((room, history, category) => {
     const at = historyAt(history, selectedDate)
     if (!at) return { pct: room.progress_pct ?? null, delta: null, flag: null }
     if (category === 'Overall') return { pct: at.overall_pct, delta: at.delta, flag: at.flag }
-    const v = at.components?.[category]
-    return { pct: typeof v === 'number' ? v : null, delta: null, flag: null }
+    const entry = (at.mapped || []).find(m => m.name === category)
+    return { pct: entry ? entry.pct : null, delta: null, flag: null }
   }, [selectedDate])
 
   const categoryFloorAvg = useCallback((category) => {
@@ -197,13 +194,13 @@ export default function FloorViewNew() {
       .slice(0, 3)
   }, [selectedEntry, roomValueFor])
 
-  // Pending components for a room at the selected date — derived from real numeric values only
+  // Pending categories for a room at the selected date — mapped activity
+  // breakdown entries that haven't hit 100% yet
   const pendingComponents = useCallback((room, history) => {
     const at = historyAt(history, selectedDate)
-    const comps = at?.components || {}
-    return Object.entries(comps)
-      .filter(([, v]) => typeof v !== 'number' || v < 100)
-      .map(([k]) => toLabel(k))
+    return (at?.mapped || [])
+      .filter(m => m.pct < 100)
+      .map(m => m.name)
   }, [selectedDate])
 
   // ── Media viewer: uploads for the focused room, closest to the selected date ──
@@ -284,7 +281,7 @@ export default function FloorViewNew() {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: 12.5, color: isActive ? 'var(--amber)' : 'var(--text-2)' }}>
-                      {cat === 'Overall' ? 'Overall' : toLabel(cat)}
+                      {cat}
                     </span>
                     <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>
                       {avg === null ? '—' : `${Math.round(avg)}%`}
@@ -308,7 +305,7 @@ export default function FloorViewNew() {
               {floors.map(f => <option key={f.id} value={f.id}>Floor {f.floor_number}</option>)}
             </select>
             <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-              {selectedCategory === 'Overall' ? 'Overall completion' : toLabel(selectedCategory)} per Room ID
+              {selectedCategory === 'Overall' ? 'Overall completion' : selectedCategory} per Room ID
             </span>
           </div>
 
