@@ -15,21 +15,34 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from models import get_db
-from models.database import Project, FloorPlan, Hotspot, HotspotCapture
+from models.database import (
+    FloorPlan, Hotspot, HotspotCapture, MediaUpload, Project, Room, UploadStatus, User,
+)
 from schemas.models import SiteProjectCreate, HotspotCreate
 from routers.auth import get_current_user
+from services.gcs_service import upload_media
+from services.walkthrough_service import require_capturable
 
 router = APIRouter(prefix="/site", tags=["site"], dependencies=[Depends(get_current_user)])
 
 UPLOAD_DIR = Path("./uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+MAX_SIZE_MB = 20
+
 
 async def _save_upload(file: UploadFile) -> str:
-    ext = Path(file.filename or "").suffix.lower() or ".jpg"
+    """Legacy local-disk write (floor plan images, and hotspots with no real
+    Room attached). Captures against a real Room go through
+    gcs_service.upload_media() instead — see capture_hotspot below."""
+    contents = await file.read()
+    return await _save_bytes(contents, file.filename or "")
+
+
+async def _save_bytes(contents: bytes, filename: str) -> str:
+    ext = Path(filename).suffix.lower() or ".jpg"
     name = f"{uuid.uuid4().hex}{ext}"
     dest = UPLOAD_DIR / name
-    contents = await file.read()
     async with aiofiles.open(dest, "wb") as f:
         await f.write(contents)
     return f"/uploads/{name}"
@@ -74,6 +87,7 @@ def _capture_out(cap: HotspotCapture) -> dict:
         "id": cap.id,
         "hotspot_id": cap.hotspot_id,
         "image_url": cap.image_url,
+        "media_upload_id": cap.media_upload_id,
         "captured_at": cap.captured_at,
     }
 
@@ -183,27 +197,84 @@ def delete_hotspot(hotspot_id: str, db: Session = Depends(get_db)):
 # ── Hotspot captures ─────────────────────────────────────────────────────────
 
 @router.post("/hotspots/{hotspot_id}/capture", status_code=201)
-async def capture_hotspot(hotspot_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def capture_hotspot(
+    hotspot_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     hs = db.query(Hotspot).get(hotspot_id)
     if not hs:
         raise HTTPException(404, "Hotspot not found")
 
-    url = await _save_upload(file)
+    # ── Canonical write path (unified media pipeline) ────────────────────────
+    # One atomic server-side operation: read the file once, store it via the
+    # same gcs_service.upload_media() every other path uses, create the
+    # canonical MediaUpload row, then a thin append-only HotspotCapture pointer
+    # to it. The upload is stamped into the project's active walkthrough by the
+    # same shared gate as the Upload page and mobile app (400 if none).
+    room = db.query(Room).get(hs.room_id) if hs.room_id else None
+    if room:
+        contents = await file.read()
+        if len(contents) > MAX_SIZE_MB * 1024 * 1024:
+            raise HTTPException(413, f"File too large (max {MAX_SIZE_MB} MB)")
 
-    cap = db.query(HotspotCapture).filter(HotspotCapture.hotspot_id == hotspot_id).first()
-    if cap:
-        cap.image_url = url
-    else:
-        cap = HotspotCapture(hotspot_id=hotspot_id, image_url=url)
+        wt = require_capturable(hs.project_id, db)
+
+        gcs_url, gcs_path = await upload_media(
+            contents, file.filename or "capture.jpg", hs.project_id, hs.room_id
+        )
+        upload = MediaUpload(
+            room_id=hs.room_id,
+            supervisor_id=user.id,
+            gcs_url=gcs_url,
+            gcs_path=gcs_path,
+            media_type="photo",
+            file_name=file.filename,
+            notes="Captured via Site Capture",
+            status=UploadStatus.pending,
+            walkthrough_id=wt.id,
+        )
+        db.add(upload)
+        db.flush()
+        cap = HotspotCapture(hotspot_id=hotspot_id, image_url=gcs_url, media_upload_id=upload.id)
         db.add(cap)
+        db.commit()
+        db.refresh(cap)
+        return _capture_out(cap)
+
+    # ── Defensive legacy path ────────────────────────────────────────────────
+    # A hotspot with no real Room (Setup blocks saving one, but don't break
+    # pre-existing rows): keep the old local-disk HotspotCapture-only write.
+    url = await _save_upload(file)
+    cap = HotspotCapture(hotspot_id=hotspot_id, image_url=url)
+    db.add(cap)
     db.commit()
     db.refresh(cap)
     return _capture_out(cap)
 
 
 @router.get("/hotspots/{hotspot_id}/capture")
-def get_capture(hotspot_id: str, db: Session = Depends(get_db)):
-    cap = db.query(HotspotCapture).filter(HotspotCapture.hotspot_id == hotspot_id).first()
+def get_capture(
+    hotspot_id: str,
+    walkthrough_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Latest capture for this hotspot — or, with `walkthrough_id`, the capture
+    made during that specific walkthrough (read-only past-walkthrough view),
+    resolved through the canonical MediaUpload row."""
+    q = db.query(HotspotCapture).filter(HotspotCapture.hotspot_id == hotspot_id)
+    if walkthrough_id:
+        cap = (
+            q.join(MediaUpload, HotspotCapture.media_upload_id == MediaUpload.id)
+            .filter(MediaUpload.walkthrough_id == walkthrough_id)
+            .order_by(HotspotCapture.captured_at.desc())
+            .first()
+        )
+        if not cap:
+            raise HTTPException(404, "No capture for this hotspot in this walkthrough")
+        return _capture_out(cap)
+    cap = q.order_by(HotspotCapture.captured_at.desc()).first()
     if not cap:
         raise HTTPException(404, "No capture for this hotspot")
     return _capture_out(cap)
@@ -211,7 +282,14 @@ def get_capture(hotspot_id: str, db: Session = Depends(get_db)):
 
 @router.delete("/hotspots/{hotspot_id}/capture", status_code=204)
 def delete_capture(hotspot_id: str, db: Session = Depends(get_db)):
-    cap = db.query(HotspotCapture).filter(HotspotCapture.hotspot_id == hotspot_id).first()
+    """Delete the LATEST capture row only — captures are append-only, so
+    earlier history stays intact."""
+    cap = (
+        db.query(HotspotCapture)
+        .filter(HotspotCapture.hotspot_id == hotspot_id)
+        .order_by(HotspotCapture.captured_at.desc())
+        .first()
+    )
     if not cap:
         raise HTTPException(404, "No capture for this hotspot")
     db.delete(cap)

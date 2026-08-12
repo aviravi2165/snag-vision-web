@@ -12,9 +12,10 @@
 
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useProject } from './useProject'
-import { useAuth } from './useAuth'
 import {
-  getFloors, uploadMedia,
+  getFloors,
+  getWalkthroughs, createWalkthrough, getCurrentWalkthrough,
+  requestCompleteWalkthrough, completeWalkthrough,
   uploadFloorPlanApi, getFloorPlanApi,
   addHotspotApi, getHotspotsApi, deleteHotspotApi,
   captureHotspotApi, getHotspotCaptureApi, deleteHotspotCaptureApi,
@@ -32,7 +33,6 @@ const unpackRoomLabel = (label) => {
 
 export function SiteProvider({ children }) {
   const { selectedProject } = useProject()
-  const { user } = useAuth()
 
   const [floors,          setFloors]          = useState([])      // real Floor rows for this project
   const [selectedFloorId, setSelectedFloorId] = useState(null)
@@ -40,8 +40,69 @@ export function SiteProvider({ children }) {
   const [hotspots,        setHotspots]        = useState([])      // hotspots for selected floor only
   const [capturedImages,  setCapturedImages]  = useState({})      // {hotspotId: image_url}
   const [ready,           setReady]           = useState(false)
+  // Walkthroughs (capture sessions) — the numbered rounds every capture
+  // belongs to. `currentWalkthrough` is the one active (non-completed) one;
+  // null means the UI shows "Start Walkthrough N" instead of capture controls.
+  const [walkthroughs,        setWalkthroughs]        = useState([])
+  const [currentWalkthrough,  setCurrentWalkthrough]  = useState(null)
+  const [walkthroughsReady,   setWalkthroughsReady]   = useState(false)
 
   const selectedFloor = floors.find(f => f.id === selectedFloorId) || null
+
+  // ── Walkthroughs — reload whenever the active DB project changes ──────────
+  const refreshWalkthroughs = useCallback(async () => {
+    if (!selectedProject) {
+      setWalkthroughs([]); setCurrentWalkthrough(null); setWalkthroughsReady(true)
+      return
+    }
+    try {
+      const { data } = await getWalkthroughs(selectedProject.id)
+      setWalkthroughs(data)
+    } catch (e) {
+      console.warn('[SiteContext] failed to load walkthroughs:', e)
+    }
+    // 404 = no active walkthrough — that's a normal state ("Start Walkthrough N")
+    getCurrentWalkthrough(selectedProject.id)
+      .then(({ data }) => setCurrentWalkthrough(data))
+      .catch(() => setCurrentWalkthrough(null))
+      .finally(() => setWalkthroughsReady(true))
+  }, [selectedProject])
+
+  useEffect(() => {
+    setWalkthroughsReady(false)
+    setWalkthroughs([])
+    setCurrentWalkthrough(null)
+    refreshWalkthroughs()
+  }, [selectedProject, refreshWalkthroughs])
+
+  // The next walkthrough's number is never chosen by the client — the backend
+  // computes max+1. This is only for the "Start Walkthrough N" button label.
+  const nextWalkthroughNumber = walkthroughs.length
+    ? Math.max(...walkthroughs.map(w => w.number)) + 1
+    : 1
+
+  const startWalkthrough = useCallback(async () => {
+    const projectId = selectedProject?.id
+    if (!projectId) return null
+    const { data } = await createWalkthrough(projectId)
+    await refreshWalkthroughs()
+    return data
+  }, [selectedProject, refreshWalkthroughs])
+
+  // request-complete returns { walkthrough, warnings } — warnings are the
+  // expected-but-uncaptured rooms; the caller shows them in a confirm dialog
+  // before calling confirmComplete().
+  const requestComplete = useCallback(async (walkthroughId) => {
+    const { data } = await requestCompleteWalkthrough(walkthroughId)
+    setCurrentWalkthrough(data.walkthrough)
+    return data
+  }, [])
+
+  const confirmComplete = useCallback(async (walkthroughId) => {
+    const { data } = await completeWalkthrough(walkthroughId)
+    await refreshWalkthroughs()
+    return data
+  }, [refreshWalkthroughs])
 
   // ── Load floors whenever the active DB project changes ─────────────────────
   useEffect(() => {
@@ -144,26 +205,22 @@ export function SiteProvider({ children }) {
   }, [selectedProject, selectedFloor])
 
   // ── Capture image for a hotspot ──────────────────────────────────────────
-  // Persists to hotspot_captures (the pinned-point photo shown here) AND, when the
-  // hotspot is linked to a real Room, also to /uploads (MediaUpload) so it's
-  // AI-analysed and shows up with a real timestamp in the Site Photo Viewer's Date filter.
+  // ONE server-side atomic operation now: the backend reads the file once,
+  // stores it via the same gcs_service.upload_media() every other path uses,
+  // creates the canonical MediaUpload row (stamped into the active walkthrough
+  // — 400 if none), and appends a thin HotspotCapture pointer to it. The old
+  // second fire-and-forget /uploads call is gone — no double-read, no swallowed
+  // error, no orphan writes.
   const captureHotspot = useCallback(async (hotspot, file) => {
     const fd = new FormData()
     fd.append('file', file)
     const { data } = await captureHotspotApi(hotspot.id, fd)
     setCapturedImages(prev => ({ ...prev, [hotspot.id]: data.image_url }))
-
-    if (hotspot.areaId) {
-      const mediaFd = new FormData()
-      mediaFd.append('file', file)
-      mediaFd.append('room_id', hotspot.areaId)
-      mediaFd.append('supervisor_id', user?.id || '')
-      mediaFd.append('notes', 'Captured via Site Capture')
-      uploadMedia(mediaFd).catch(e => console.warn('[SiteContext] failed to persist capture to backend:', e))
-    }
-
+    // First capture flips draft -> capturing server-side; a capture while
+    // ready_to_complete auto-reverts it to capturing. Keep the bar honest.
+    refreshWalkthroughs().catch(() => {})
     return data.image_url
-  }, [user])
+  }, [refreshWalkthroughs])
 
   // ── Remove capture ───────────────────────────────────────────────────────
   const removeCapture = useCallback(async (hotspotId) => {
@@ -176,9 +233,11 @@ export function SiteProvider({ children }) {
       // state
       ready, selectedProject, floors, selectedFloorId, setSelectedFloorId,
       floorPlanUrl, hotspots, capturedImages,
+      walkthroughs, currentWalkthrough, walkthroughsReady, nextWalkthroughNumber,
       // actions
       uploadFloorPlan, addHotspot, removeHotspot, saveLayout,
       captureHotspot, removeCapture,
+      startWalkthrough, requestComplete, confirmComplete, refreshWalkthroughs,
     }}>
       {children}
     </SiteCtx.Provider>

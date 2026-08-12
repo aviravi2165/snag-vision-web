@@ -144,6 +144,10 @@ class UploadOut(BaseModel):
     notes: Optional[str]
     status: UploadStatus
     uploaded_at: datetime
+    # The walkthrough (CaptureSession) this capture belongs to — set for every
+    # capture written after the unified media pipeline; None for pre-walkthrough
+    # era rows. Additive; old clients ignore it.
+    walkthrough_id: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -306,4 +310,54 @@ class IssueOut(BaseModel):
     resolved_at: Optional[datetime] = None
     marker: Optional[MarkerOut] = None
     comment_count: int = 0
+
+
+# --- Walkthroughs (CaptureSession, exposed to the UI everywhere as a
+# "Walkthrough") ---
+# The row itself is a generic session (session_type default "walkthrough" — the
+# same extensibility seam as Marker.marker_type); only the API/UI language is
+# walkthrough-specific. See models/database.py::CaptureSession.
+
+class WalkthroughOut(BaseModel):
+    id: str
+    project_id: str
+    session_type: str
+    number: int
+    status: str                       # WalkthroughStatus value string
+    started_at: Optional[datetime] = None
+    ready_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    ai_started_at: Optional[datetime] = None
+    ai_completed_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    # Derived per-walkthrough media counts (filled in by the routers' serializers)
+    capture_count: int = 0
+    pending_count: int = 0
+    done_count: int = 0
+    failed_count: int = 0
+
+
+class RequestCompleteOut(BaseModel):
+    """POST /walkthroughs/{id}/request-complete — always transitions to
+    ready_to_complete (zero captures is a hard 400); `warnings` lists the
+    expected rooms (hotspots pinned in Setup) with no capture yet, so the
+    UI can ask "capture these, or complete anyway?" before confirming."""
+    walkthrough: WalkthroughOut
+    warnings: List[Dict[str, Any]] = []   # [{room_id, room_name, floor_number}]
+
+
+class MediaGroupOut(BaseModel):
+    """One section of the Media Manager — a walkthrough's uploads plus its
+    summary row (Total / Pending AI / Done / Failed)."""
+    walkthrough: Optional[WalkthroughOut] = None   # None = pre-walkthrough-era legacy group
+    label: str
+    summary: Dict[str, int]
+    media: List[Dict[str, Any]]
+
+
+class ProjectMediaOut(BaseModel):
+    """GET /uploads/project/{project_id} — grouped by walkthrough, newest first."""
+    project_id: str
+    groups: List[MediaGroupOut]
 

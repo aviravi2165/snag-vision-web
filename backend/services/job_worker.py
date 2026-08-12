@@ -15,7 +15,8 @@ from datetime import datetime
 
 from models import SessionLocal
 from models.database import (
-    AnalysisJob, AnalysisJobStatus, MediaUpload, UploadStatus, Room, Project,
+    AnalysisJob, AnalysisJobStatus, CaptureSession, MediaUpload, UploadStatus,
+    Room, Project, WalkthroughStatus,
 )
 from services.gcs_service import download_media
 from services.gemini_service import analyse_image, compute_change_flag
@@ -102,6 +103,7 @@ async def _run_job(job_id: str):
 
         job.status = AnalysisJobStatus.done if job.failed_images < job.total_images else AnalysisJobStatus.failed
         job.finished_at = datetime.utcnow()
+        _sync_walkthrough_on_finish(db, job)
         db.commit()
     except Exception as e:
         job = db.query(AnalysisJob).get(job_id)
@@ -109,10 +111,30 @@ async def _run_job(job_id: str):
             job.status = AnalysisJobStatus.failed
             job.error_message = str(e)
             job.finished_at = datetime.utcnow()
+            _sync_walkthrough_on_finish(db, job)
             db.commit()
         print(f"_run_job error: {e}")
     finally:
         db.close()
+
+
+def _sync_walkthrough_on_finish(db, job):
+    """Walkthrough lifecycle flip when a job finishes: ai_processing ->
+    ai_completed on success; back to completed on failure (retryable — the
+    next "Start AI Analysis" picks it up again). Legacy jobs (walkthrough_id
+    NULL) are untouched."""
+    if not job.walkthrough_id:
+        return
+    wt = db.query(CaptureSession).get(job.walkthrough_id)
+    if not wt:
+        return
+    if job.status == AnalysisJobStatus.done:
+        wt.status = WalkthroughStatus.ai_completed
+        wt.ai_completed_at = datetime.utcnow()
+    else:
+        wt.status = WalkthroughStatus.completed
+        wt.ai_started_at = None
+        wt.ai_completed_at = None
 
 
 async def _analyse_one_upload(upload_id: str, job_id: str):

@@ -30,11 +30,22 @@ import { useProject } from '../hooks/useProject'
 import { getProgressMatrix } from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell,
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  PieChart, Pie, Cell, LabelList,
 } from 'recharts'
 
 const COMPLETED_AT = 95   // >= this % counts as "Work Completed"
+
+// Bar fill + track as specified: solid blue on a very light blue track.
+const BAR_FILL = '#2563EB'
+const BAR_TRACK = '#EAF2FF'
+
+// Weekly trend points (same series the classic dashboard shows: W1–W5 + Now).
+const weeklyTrend = [
+  { week: 'W1', pct: 30 }, { week: 'W2', pct: 45 },
+  { week: 'W3', pct: 60 }, { week: 'W4', pct: 75 },
+  { week: 'W5', pct: 83 }, { week: 'Now', pct: null },
+]
 
 function statusFor(val) {
   if (val === null || val === undefined) return 'Cannot Assess'
@@ -192,12 +203,15 @@ export default function DashboardNew() {
   ), [activityNames, matrix, targetDateFor, isDelayed])
 
   // ── Completion by Location — per-location average across activities ─────
+  // Completion by Location — ascending by unit number (A-101, A-102, A-103, …).
   const locationChart = useMemo(() => (
-    filteredLocations.map(loc => {
-      const vals = activityNames.map(a => cellValue(loc, a)).filter(v => typeof v === 'number')
-      const avg = vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : 0
-      return { name: locationLabel(loc), pct: Math.round(avg) }
-    })
+    filteredLocations
+      .map(loc => {
+        const vals = activityNames.map(a => cellValue(loc, a)).filter(v => typeof v === 'number')
+        const avg = vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : 0
+        return { name: locationLabel(loc), pct: Math.round(avg), unitNo: loc.unit_number }
+      })
+      .sort((a, b) => String(a.unitNo).localeCompare(String(b.unitNo), undefined, { numeric: true }))
   ), [filteredLocations, activityNames, cellValue])
 
   const summaryData = [
@@ -299,8 +313,8 @@ export default function DashboardNew() {
                       </span>
                       <span style={{ fontWeight: 600 }}>{a.hasData ? `${a.pct}%` : '—'}</span>
                     </div>
-                    <div style={{ height: 10, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${a.pct}%`, background: a.delayed ? '#EF4444' : '#F5C842', borderRadius: 4 }} />
+                    <div style={{ height: 10, background: BAR_TRACK, borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${a.pct}%`, background: BAR_FILL, borderRadius: 4 }} />
                     </div>
                   </div>
                 ))}
@@ -334,27 +348,56 @@ export default function DashboardNew() {
             </div>
           </div>
 
-          {/* Completion by Location */}
-          <div className="card">
-            <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
-              Completion by Location
-            </div>
-            {locationChart.length === 0 ? <Empty message="No locations yet" /> : (
-              <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-                <div style={{ minWidth: Math.max(locationChart.length * 70, 100), height: 260 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={locationChart}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
-                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#666' }} axisLine={false} tickLine={false}
-                        angle={-40} textAnchor="end" height={70} interval={0} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
-                      <Tooltip content={<LightTooltip />} />
-                      <Bar dataKey="pct" fill="#2563EB" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+          {/* Completion by Location + Weekly progress trend — side by side */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'stretch' }}>
+            <div className="card">
+              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
+                Completion by Location
               </div>
-            )}
+              {locationChart.length === 0 ? <Empty message="No locations yet" /> : (
+                <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+                  <div style={{ minWidth: Math.max(locationChart.length * 70, 100), height: 260 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={locationChart}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
+                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#666' }} axisLine={false} tickLine={false}
+                          angle={-40} textAnchor="end" height={70} interval={0} />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+                        <Tooltip content={<LightTooltip />} />
+                        <Bar dataKey="pct" fill="#2563EB" radius={[4, 4, 0, 0]} barSize={24}>
+                          <LabelList dataKey="pct" position="top"
+                            formatter={v => `${v}%`}
+                            style={{ fontSize: 10, fill: '#444', fontWeight: 600 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
+                Weekly progress trend
+              </div>
+              <div style={{ height: 260 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={weeklyTrend}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
+                    <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<LightTooltip />} />
+                    <Line
+                      type="monotone" dataKey="pct"
+                      stroke="#2563EB" strokeWidth={2.5}
+                      dot={{ r: 4, fill: '#2563EB', stroke: '#FFFFFF', strokeWidth: 2 }}
+                      connectNulls={false}
+                      activeDot={{ r: 6, fill: '#2563EB' }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           </div>
         </>
       )}

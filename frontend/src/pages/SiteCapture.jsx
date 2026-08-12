@@ -14,6 +14,8 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSite } from '../hooks/SiteContext'
 import { HotspotDot } from './SiteSetup'
+import WalkthroughBar from '../components/WalkthroughBar'
+import { getHotspotCaptureApi } from '../utils/api'
 import toast from 'react-hot-toast'
 
 export default function SiteCapture() {
@@ -22,13 +24,25 @@ export default function SiteCapture() {
     ready, selectedProject, floors, selectedFloorId, setSelectedFloorId,
     floorPlanUrl, hotspots, capturedImages,
     captureHotspot, removeCapture,
+    walkthroughs, currentWalkthrough, walkthroughsReady, nextWalkthroughNumber,
+    startWalkthrough, requestComplete, confirmComplete,
   } = useSite()
+
+  // Read-only past-walkthrough viewing: clicking a completed chip in the bar
+  // loads that walkthrough's captures (via ?walkthrough_id=) into a separate
+  // map so the current captures stay untouched.
+  const [viewing,        setViewing]        = useState(null)
+  const [viewingImages,  setViewingImages]  = useState({})
+  const [busy,           setBusy]           = useState(false)
 
   const [activeHotspot, setActiveHotspot] = useState(null)   // hotspot object
   const [panelFile,     setPanelFile]     = useState(null)   // File selected in panel
   const [panelPreview,  setPanelPreview]  = useState(null)   // object URL preview
   const [submitting,    setSubmitting]    = useState(false)
-  const [hoveredId,     setHoveredId]     = useState(null)
+
+  // Which images the UI shows: the current walkthrough's by default, the
+  // viewed walkthrough's while in read-only mode.
+  const displayImages = viewing ? viewingImages : capturedImages
 
   const fileRef   = useRef(null)
   const cameraRef = useRef(null)
@@ -79,15 +93,16 @@ export default function SiteCapture() {
 
   // ── Counts ─────────────────────────────────────────────────────────────────
   const totalPoints   = hotspots.length
-  const capturedCount = Object.keys(capturedImages).length
+  const capturedCount = Object.keys(displayImages).length
   const pct           = totalPoints ? Math.round((capturedCount / totalPoints) * 100) : 0
+  const canCapture    = !viewing && !!currentWalkthrough
 
   // ── Open capture panel ─────────────────────────────────────────────────────
   const openPanel = useCallback((hs) => {
     setActiveHotspot(hs)
     setPanelFile(null)
-    setPanelPreview(capturedImages[hs.id] || null)
-  }, [capturedImages])
+    setPanelPreview(displayImages[hs.id] || null)
+  }, [displayImages])
 
   const closePanel = () => {
     setActiveHotspot(null)
@@ -105,13 +120,14 @@ export default function SiteCapture() {
   // ── Confirm capture ────────────────────────────────────────────────────────
   const handleCapture = async () => {
     if (!panelFile || !activeHotspot) return
+    if (!canCapture) { toast.error('Start a walkthrough before capturing'); return }
     setSubmitting(true)
     try {
       await captureHotspot(activeHotspot, panelFile)
       toast.success(`Point captured successfully`, { icon: '✅' })
       closePanel()
     } catch (e) {
-      toast.error('Capture failed')
+      toast.error(e.response?.data?.detail || 'Capture failed')
     } finally {
       setSubmitting(false)
     }
@@ -120,7 +136,8 @@ export default function SiteCapture() {
   // ── Remove capture ─────────────────────────────────────────────────────────
   const handleRemoveCapture = async () => {
     if (!activeHotspot) return
-    if (!window.confirm('Remove captured image from this point?')) return
+    if (!canCapture) return
+    if (!window.confirm('Remove the latest captured image from this point?')) return
     await removeCapture(activeHotspot.id)
     setPanelPreview(null)
     setPanelFile(null)
@@ -136,6 +153,38 @@ export default function SiteCapture() {
 
   // ── Close panel whenever the selected floor changes (its hotspots no longer apply) ──
   useEffect(() => { closePanel() }, [selectedFloorId])
+
+  // ── Close panel when entering/exiting a read-only walkthrough view ──
+  useEffect(() => { closePanel() }, [viewing])
+
+  // ── Read-only walkthrough view: load that walkthrough's captures per hotspot ──
+  useEffect(() => {
+    let cancelled = false
+    setViewingImages({})
+    if (!viewing || !hotspots.length) return
+    ;(async () => {
+      const caps = {}
+      for (const hs of hotspots) {
+        const cap = await getHotspotCaptureApi(hs.id, { walkthrough_id: viewing.id })
+          .then(r => r.data).catch(() => null)
+        if (cap?.image_url) caps[hs.id] = cap.image_url
+      }
+      if (!cancelled) setViewingImages(caps)
+    })()
+    return () => { cancelled = true }
+  }, [viewing, hotspots])
+
+  const handleStartWalkthrough = async () => {
+    setBusy(true)
+    try {
+      const wt = await startWalkthrough()
+      toast.success(`Walkthrough ${wt?.number ?? ''} started — captures enabled`)
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Could not start walkthrough')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const selectedFloor = floors.find(f => f.id === selectedFloorId) || null
 
@@ -168,7 +217,7 @@ export default function SiteCapture() {
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+        flexWrap: 'wrap', gap: 12, marginBottom: 8 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
             <button onClick={() => navigate('/site-setup')} style={{ background: 'none', border: 'none',
@@ -196,6 +245,22 @@ export default function SiteCapture() {
           <ProgressPill value={pct + '%'} label="Complete" color="#6366F1" />
         </div>
       </div>
+
+      {/* ── Walkthrough bar (history strip + Start/Complete) ── */}
+      {walkthroughsReady && (
+        <WalkthroughBar
+          walkthroughs={walkthroughs}
+          current={currentWalkthrough}
+          nextNumber={nextWalkthroughNumber}
+          viewing={viewing}
+          busy={busy}
+          onStartWalkthrough={handleStartWalkthrough}
+          onRequestComplete={() => requestComplete(currentWalkthrough.id)}
+          onConfirmComplete={() => confirmComplete(currentWalkthrough.id)}
+          onViewWalkthrough={setViewing}
+          onExitView={() => setViewing(null)}
+        />
+      )}
 
       {/* ── Progress bar ── */}
       <div style={{ marginBottom: 20 }}>
@@ -291,7 +356,7 @@ export default function SiteCapture() {
                   <HotspotDot
                     key={h.id}
                     hotspot={h}
-                    captured={!!capturedImages[h.id]}
+                    captured={!!displayImages[h.id]}
                     active={activeHotspot?.id === h.id}
                     interactive={true}
                     zoom={transform.scale}
@@ -346,24 +411,26 @@ export default function SiteCapture() {
               </div>
 
               {/* Current capture status */}
-              {capturedImages[activeHotspot.id] ? (
+              {displayImages[activeHotspot.id] ? (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: '#4ADE80', marginBottom: 8,
                     display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>✓</span> 360° image captured
+                    <span>✓</span> {viewing ? 'Captured (read-only view)' : '360° image captured'}
                   </div>
                   <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)',
                     position: 'relative' }}>
-                    <img src={panelPreview || capturedImages[activeHotspot.id]}
+                    <img src={panelPreview || displayImages[activeHotspot.id]}
                       alt="captured"
                       style={{ width: '100%', maxHeight: 160, objectFit: 'cover', display: 'block' }} />
-                    <div style={{ position: 'absolute', top: 6, right: 6 }}>
-                      <button onClick={handleRemoveCapture} style={{ background: 'rgba(0,0,0,0.7)',
-                        border: 'none', borderRadius: 6, padding: '4px 8px',
-                        color: '#F87171', cursor: 'pointer', fontSize: 11 }}>
-                        🗑 Remove
-                      </button>
-                    </div>
+                    {!viewing && canCapture && (
+                      <div style={{ position: 'absolute', top: 6, right: 6 }}>
+                        <button onClick={handleRemoveCapture} style={{ background: 'rgba(0,0,0,0.7)',
+                          border: 'none', borderRadius: 6, padding: '4px 8px',
+                          color: '#F87171', cursor: 'pointer', fontSize: 11 }}>
+                          🗑 Remove
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : panelPreview ? (
@@ -386,7 +453,7 @@ export default function SiteCapture() {
               ) : null}
 
               {/* Upload options */}
-              {!capturedImages[activeHotspot.id] && (
+              {!displayImages[activeHotspot.id] && canCapture && (
                 <>
                   <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10 }}>
                     Attach a 360° panoramic photo to this point:
@@ -404,13 +471,23 @@ export default function SiteCapture() {
                 </>
               )}
 
+              {/* No active walkthrough — captures are locked server-side too */}
+              {!displayImages[activeHotspot.id] && !canCapture && (
+                <div style={{ fontSize: 12, color: 'var(--text-3)', background: 'var(--bg-hover)',
+                  border: '1px dashed var(--border)', borderRadius: 10, padding: 14, marginBottom: 8 }}>
+                  {viewing
+                    ? `Read-only view of Walkthrough ${viewing.number} — no captures can be added.`
+                    : 'No active walkthrough — start one above to enable captures.'}
+                </div>
+              )}
+
               <input ref={cameraRef} type="file" accept="image/*" capture="environment"
                 style={{ display: 'none' }} onChange={handleFileSelect} />
               <input ref={fileRef}   type="file" accept="image/*"
                 style={{ display: 'none' }} onChange={handleFileSelect} />
 
               {/* Confirm/replace button */}
-              {panelFile && (
+              {panelFile && canCapture && (
                 <button
                   className="btn-primary"
                   onClick={handleCapture}
@@ -422,7 +499,7 @@ export default function SiteCapture() {
                 </button>
               )}
 
-              {capturedImages[activeHotspot.id] && !panelFile && (
+              {displayImages[activeHotspot.id] && !panelFile && canCapture && (
                 <button
                   className="btn-ghost"
                   onClick={() => { fileRef.current.value = ''; fileRef.current.click() }}

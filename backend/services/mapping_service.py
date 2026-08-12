@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from models.database import (
     Activity, ActivityMapping, UnmappedComponent, UnitActivityProgress,
-    Unit, AIAnalysis, Project,
+    Unit, Floor, AIAnalysis, Project,
 )
 from services.gemini_service import _get_client, slugify_activity
 from google.genai import types
@@ -104,6 +104,149 @@ async def generate_ai_mapping(project_id: str, activities: List[Activity], db: S
                 activity_id=activity.id, confidence=confidence, source="ai",
             ))
             created += 1
+    db.commit()
+    return created
+
+
+def _mapping_lookup(project_id: str, db: Session) -> Dict[str, str]:
+    """component_key -> activity_id for a project, best-confidence row wins.
+    Read-only — no UnmappedComponent side effects (GET paths use this)."""
+    rows = db.query(ActivityMapping).filter(ActivityMapping.project_id == project_id).all()
+    lookup: Dict[str, str] = {}
+    for m in sorted(rows, key=lambda r: r.confidence or 0.0, reverse=True):
+        if m.component_key not in lookup:
+            lookup[m.component_key] = m.activity_id
+    return lookup
+
+
+def mapped_breakdown(
+    components: dict,
+    project_id: str,
+    db: Session,
+    lookup: Optional[Dict[str, str]] = None,
+    threshold: Optional[float] = None,
+) -> List[dict]:
+    """Group one analysis's raw components through the project's mapping table.
+
+    Returns [{"activity_id", "pct", "confidence"}] — per-activity averages,
+    applying the project's confidence threshold. Purely read-only: unlike
+    resolve_component it never logs unmapped components, so it is safe on GET
+    endpoints (AI Analysis / Floor View). Callers that already have the
+    lookup/threshold handy pass them in to avoid re-querying per analysis."""
+    if not components:
+        return []
+    if lookup is None:
+        lookup = _mapping_lookup(project_id, db)
+    if threshold is None:
+        project = db.query(Project).get(project_id)
+        threshold = project.confidence_threshold if project and project.confidence_threshold is not None else 0.5
+
+    pcts_by_activity: Dict[str, List[float]] = {}
+    conf_by_activity: Dict[str, List[float]] = {}
+    for key, value in components.items():
+        activity_id = lookup.get(key)
+        if not activity_id:
+            continue
+        if isinstance(value, dict):
+            pct = value.get("pct")
+            confidence = value.get("confidence")
+        else:
+            pct, confidence = value, 1.0  # legacy flat-number analyses
+        if pct is None or confidence is None or confidence < threshold:
+            continue
+        pcts_by_activity.setdefault(activity_id, []).append(pct)
+        conf_by_activity.setdefault(activity_id, []).append(confidence)
+
+    return [
+        {
+            "activity_id": aid,
+            "pct": sum(pcts) / len(pcts),
+            "confidence": sum(conf_by_activity[aid]) / len(conf_by_activity[aid]),
+        }
+        for aid, pcts in pcts_by_activity.items()
+    ]
+
+
+async def classify_observed_components(project_id: str, db: Session) -> int:
+    """One text-only Gemini call per project: assign every *observed* component
+    key (collected from this project's analyses) to one of its activities, or
+    drop it. Writes ActivityMapping rows (source="ai", replacing prior ai rows)
+    so the existing aggregation machinery can roll raw components up into the
+    project's activity plan. Returns the number of mapping rows created."""
+    room_ids: List[str] = []
+    for f in db.query(Floor).filter(Floor.project_id == project_id).all():
+        for u in f.units:
+            room_ids.extend(r.id for r in u.rooms)
+        room_ids.extend(r.id for r in f.rooms)  # flat (mobile) rooms
+    if not room_ids:
+        return 0
+
+    keys: set = set()
+    for a in db.query(AIAnalysis).filter(AIAnalysis.room_id.in_(room_ids)).all():
+        if a.components:
+            keys.update(a.components.keys())
+    if not keys:
+        return 0
+
+    activities = db.query(Activity).filter(Activity.project_id == project_id).order_by(Activity.sort_order).all()
+    if not activities:
+        return 0
+
+    activity_names = [a.name for a in activities]
+    bullets = "\n".join(f"- {n}" for n in activity_names)
+    labels = json.dumps(sorted(keys))
+    prompt = f"""
+You are mapping computer-vision component labels detected in construction/
+interior site photos to a project's standard activity categories. For each
+label pick the SINGLE activity it most strongly indicates — visual evidence
+relevant to that activity. If a label fits no activity (e.g. a generic or
+ambiguous term), omit it entirely.
+
+Project activities:
+{bullets}
+
+Component labels:
+{labels}
+
+Respond ONLY with a JSON object. Each key is a component label; each value
+is an object: {{"activity": "<exact activity name from the list>",
+"confidence": <0.0-1.0>}}. Omit labels that fit no activity.
+"""
+    try:
+        response = await _get_client().aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[prompt],
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+        data = json.loads(response.text)
+    except Exception as e:
+        print(f"classify_observed_components error: {e}")
+        return 0
+
+    name_to_activity = {a.name: a.id for a in activities}
+    db.query(ActivityMapping).filter(
+        ActivityMapping.project_id == project_id, ActivityMapping.source == "ai"
+    ).delete()
+
+    created = 0
+    for key, entry in (data or {}).items():
+        if isinstance(entry, dict):
+            activity_name = entry.get("activity")
+            confidence = entry.get("confidence")
+        elif isinstance(entry, str):
+            activity_name, confidence = entry, 0.9
+        else:
+            continue
+        if not activity_name:
+            continue
+        activity_id = name_to_activity.get(activity_name)
+        if not activity_id:
+            continue
+        db.add(ActivityMapping(
+            project_id=project_id, component_key=key, activity_id=activity_id,
+            confidence=float(confidence or 0.9), source="ai",
+        ))
+        created += 1
     db.commit()
     return created
 

@@ -17,6 +17,7 @@ from schemas.models import LoginIn, MobileSpotCreate, UserCreate
 from routers.auth import verify_pw, hash_pw, create_token, ALGORITHM
 from routers.uploads import _run_analysis
 from services.gcs_service import upload_media
+from services.walkthrough_service import require_capturable
 
 router = APIRouter(prefix="/mobile", tags=["mobile"])
 
@@ -275,6 +276,19 @@ async def upload_photo(
     if not room:
         raise HTTPException(404, "Room not found")
 
+    # Same shared gate as Site Capture and the web Upload page: every capture
+    # origin writes into the project's active walkthrough (400 otherwise).
+    # Mobile photos analyse immediately (status=analysing below), but the stamp
+    # still groups them into the walkthrough for the Media Manager.
+    project_id = None
+    if room.unit and room.unit.floor:
+        project_id = room.unit.floor.project_id
+    elif room.floor:
+        project_id = room.floor.project_id
+    if not project_id:
+        raise HTTPException(400, "Room is not linked to a project")
+    wt = require_capturable(project_id, db)
+
     contents = await image.read()
     if len(contents) > MAX_SIZE_MB * 1024 * 1024:
         raise HTTPException(413, f"File too large (max {MAX_SIZE_MB} MB)")
@@ -293,6 +307,7 @@ async def upload_photo(
         notes=f"checksum:{checksum}" if checksum else None,
         status=UploadStatus.analysing,
         client_photo_id=photoId,
+        walkthrough_id=wt.id,
     )
     db.add(upload)
     db.commit()

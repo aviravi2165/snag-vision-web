@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import {
   getProjects, getFloors, getUnits, getRooms, uploadMedia,
   getPendingAnalysisCount, startAnalysis, getAnalysisJob,
+  getProjectUploads,
 } from '../utils/api'
 import { useAuth } from '../hooks/useAuth'
 
@@ -19,6 +20,9 @@ export default function Upload() {
   const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [results, setResults] = useState([])
+  // Media Manager — every capture for the project, grouped by walkthrough,
+  // each group carrying its summary row (Total / Pending AI / Done / Failed).
+  const [mediaGroups, setMediaGroups] = useState([])
 
   // ── "Start AI Analysis" — upload only stores files; analysis is triggered
   // explicitly here, then this job is polled until it finishes. ──────────────
@@ -32,7 +36,13 @@ export default function Upload() {
     getPendingAnalysisCount(form.projectId).then(({ data }) => setPendingCount(data.pending_count)).catch(() => {})
   }, [form.projectId])
 
+  const refreshMedia = useCallback(() => {
+    if (!form.projectId) { setMediaGroups([]); return }
+    getProjectUploads(form.projectId).then(({ data }) => setMediaGroups(data.groups || [])).catch(() => setMediaGroups([]))
+  }, [form.projectId])
+
   useEffect(() => { refreshPendingCount() }, [refreshPendingCount])
+  useEffect(() => { refreshMedia() }, [refreshMedia])
 
   useEffect(() => {
     clearInterval(pollRef.current)
@@ -44,6 +54,7 @@ export default function Upload() {
         if (['done', 'failed'].includes(data.status)) {
           clearInterval(pollRef.current)
           refreshPendingCount()
+          refreshMedia()
           toast[data.status === 'done' ? 'success' : 'error'](
             data.status === 'done' ? 'AI analysis complete' : 'AI analysis failed'
           )
@@ -53,7 +64,7 @@ export default function Upload() {
       }
     }, JOB_POLL_MS)
     return () => clearInterval(pollRef.current)
-  }, [job, form.projectId, refreshPendingCount])
+  }, [job, form.projectId, refreshPendingCount, refreshMedia])
 
   const handleStartAnalysis = async () => {
     if (!form.projectId) return
@@ -110,6 +121,7 @@ export default function Upload() {
     }
     setResults(res); setFiles([]); setUploading(false)
     refreshPendingCount()
+    refreshMedia()
   }
 
   return (
@@ -262,6 +274,124 @@ export default function Upload() {
           ))}
         </div>
       )}
+
+      {/* Media Manager — grouped by walkthrough, summary per group */}
+      {mediaGroups.length > 0 && (
+        <div style={{ marginTop: 28 }}>
+          <div style={{ fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 18, marginBottom: 4 }}>
+            Media Manager
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 16 }}>
+            Every capture for this project, grouped by walkthrough. Captures made before
+            walkthroughs existed appear under Legacy.
+          </p>
+
+          {mediaGroups.map(g => (
+            <div key={g.walkthrough?.id || 'legacy'} className="card" style={{ marginBottom: 16, padding: 18 }}>
+              {/* Group header: label + walkthrough status + summary chips */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 14, color: 'var(--text-1)' }}>
+                    {g.label}
+                  </span>
+                  {g.walkthrough && (
+                    <WalkthroughBadge status={g.walkthrough.status} />
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <SummaryChip label="Total" value={g.summary.total} color="#94A3B8" />
+                  <SummaryChip label="Pending AI" value={g.summary.pending} color="#F5C842" />
+                  <SummaryChip label="Done" value={g.summary.done} color="#22C55E" />
+                  <SummaryChip label="Failed" value={g.summary.failed} color="#F87171" />
+                </div>
+              </div>
+
+              {/* File grid */}
+              {g.media.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text-3)' }}>No media in this group.</div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+                  {g.media.map(m => (
+                    <div key={m.id} style={{ borderRadius: 10, overflow: 'hidden',
+                      border: '1px solid var(--border)', background: 'var(--bg-hover)' }}>
+                      {m.media_type === 'photo' ? (
+                        <img src={m.gcs_url} alt={m.file_name || 'capture'}
+                          style={{ width: '100%', height: 110, objectFit: 'cover', display: 'block' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: 110, display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', fontSize: 26, background: '#0a0c11' }}>
+                          🎬
+                        </div>
+                      )}
+                      <div style={{ padding: '8px 10px' }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-1)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}
+                          title={m.file_name || ''}>
+                          {m.file_name || '(unnamed)'}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 2 }}>
+                          {m.floor_number != null && `Floor ${m.floor_number} · `}
+                          {[m.parent_label, m.location_label].filter(Boolean).join(' · ') || 'Unplaced'}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 6 }}>
+                          {m.uploaded_at ? new Date(m.uploaded_at).toLocaleDateString() : ''}
+                        </div>
+                        <UploadStatusBadge status={m.status} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
+  )
+}
+
+// ─── Small presentational bits for the Media Manager ─────────────────────────
+
+const WT_STATUS_META = {
+  draft:             { label: 'Draft',             color: '#94A3B8' },
+  capturing:         { label: 'Capturing',         color: '#F5C842' },
+  ready_to_complete: { label: 'Ready to complete', color: '#6366F1' },
+  completed:         { label: 'Completed',         color: '#22C55E' },
+  ai_processing:     { label: 'AI analysing…',     color: '#F5C842' },
+  ai_completed:      { label: 'AI complete',       color: '#22C55E' },
+}
+
+const UPLOAD_STATUS_META = {
+  pending:   { label: 'Pending AI', color: '#F5C842' },
+  analysing: { label: 'Analysing',  color: '#818CF8' },
+  done:      { label: 'Done',       color: '#22C55E' },
+  failed:    { label: 'Failed',     color: '#F87171' },
+}
+
+function WalkthroughBadge({ status }) {
+  const meta = WT_STATUS_META[status] || { label: status, color: '#94A3B8' }
+  return (
+    <span style={{ fontSize: 10, fontWeight: 600, color: meta.color,
+      border: `1px solid ${meta.color}33`, background: 'var(--bg-hover)',
+      borderRadius: 20, padding: '2px 8px' }}>
+      {meta.label}
+    </span>
+  )
+}
+
+function UploadStatusBadge({ status }) {
+  const meta = UPLOAD_STATUS_META[status] || { label: status, color: '#94A3B8' }
+  return (
+    <span style={{ fontSize: 10, fontWeight: 600, color: meta.color }}>● {meta.label}</span>
+  )
+}
+
+function SummaryChip({ label, value, color }) {
+  return (
+    <span style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--bg-hover)',
+      border: '1px solid var(--border)', borderRadius: 20, padding: '3px 9px' }}>
+      {label}: <span style={{ fontWeight: 700, color }}>{value}</span>
+    </span>
   )
 }

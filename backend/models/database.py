@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, String, Integer, Float, DateTime, ForeignKey,
-    Text, Enum, JSON, Boolean, create_engine
+    Text, Enum, JSON, Boolean, UniqueConstraint, create_engine
 )
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import UUID
@@ -34,6 +34,22 @@ class AnalysisJobStatus(str, enum.Enum):
     running = "running"
     done = "done"
     failed = "failed"
+
+
+class WalkthroughStatus(str, enum.Enum):
+    """Lifecycle of a CaptureSession (exposed to the UI as a "Walkthrough").
+    See the state machine in routers/walkthroughs.py:
+      draft --(first capture)--> capturing --(request-complete)--> ready_to_complete
+      ready_to_complete --(new capture)--> capturing          [auto-revert]
+      ready_to_complete --(confirm)--> completed
+      completed --(analysis start)--> ai_processing --(job done)--> ai_completed
+                                      --(job failed)--> completed (retryable)"""
+    draft = "draft"
+    capturing = "capturing"
+    ready_to_complete = "ready_to_complete"
+    completed = "completed"
+    ai_processing = "ai_processing"
+    ai_completed = "ai_completed"
 
 
 class IssueStatus(str, enum.Enum):
@@ -150,6 +166,11 @@ class MediaUpload(Base):
     # Which AnalysisJob processed this upload — set when a "Start AI Analysis" job
     # picks it up. Null while status="pending" (uploaded, awaiting a job).
     job_id = Column(String(36), ForeignKey("analysis_jobs.id"), nullable=True)
+    # The walkthrough (CaptureSession) this capture belongs to — stamped at write
+    # time by one shared helper (services/walkthrough_service.py::require_capturable),
+    # reused by Site Capture, the Upload page and the mobile app, so every origin
+    # lands in the same append-only pipeline. Null = pre-walkthrough-era row.
+    walkthrough_id = Column(String(36), ForeignKey("capture_sessions.id"), nullable=True, index=True)
     room = relationship("Room", back_populates="uploads")
     supervisor = relationship("User", back_populates="uploads")
     analysis = relationship("AIAnalysis", back_populates="upload", uselist=False, cascade="all, delete")
@@ -226,10 +247,19 @@ class Hotspot(Base):
 
 
 class HotspotCapture(Base):
+    """Thin, APPEND-ONLY pointer from a Site Capture pin to the canonical
+    MediaUpload row — the capture itself lives in media_uploads (same store as
+    the Upload page, mobile app and AI pipeline). Kept only because Site
+    Capture's own UI needs "what does this pin currently show".
+
+    Was upserted (one row per hotspot, history overwritten) before the unified
+    media pipeline; now every capture adds a row, so the same room captured
+    again keeps both photos instead of replacing the old one."""
     __tablename__ = "hotspot_captures"
     id = Column(String(36), primary_key=True, default=gen_uuid)
     hotspot_id = Column(String(36), ForeignKey("hotspots.id"), nullable=False)
     image_url = Column(String(500))
+    media_upload_id = Column(String(36), ForeignKey("media_uploads.id"), nullable=True)
     captured_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -271,6 +301,24 @@ class ActivityMapping(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     activity = relationship("Activity", back_populates="mappings")
+
+
+class StandardComponentMapping(Base):
+    """Global (project-independent) classifier: Gemini's open-vocabulary
+    component keys (e.g. "ceiling_paint") -> one of the standard activity
+    categories (services/activity_catalog.py::STANDARD_ACTIVITIES). One row
+    per component key, shared by every project — this is what Floor View /
+    AI Analysis roll raw components into, completely independent of a
+    project's own Activity plan (which stays the Executive dashboard's
+    Activity-Excel BoQ view). The standard taxonomy is the same everywhere,
+    so the mapping lives globally, not per project."""
+    __tablename__ = "standard_component_mappings"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    component_key = Column(String(100), nullable=False, unique=True, index=True)
+    category = Column(String(255), nullable=False)   # one of STANDARD_ACTIVITIES
+    confidence = Column(Float, default=0.9)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class UnmappedComponent(Base):
@@ -345,6 +393,41 @@ class AnalysisJob(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+    # Every analysis job now belongs to exactly one walkthrough (CaptureSession)
+    # — a "Start AI Analysis" run never mixes media across walkthroughs. Nullable
+    # because the self-healing column migrator always adds NULL-able columns; new
+    # jobs always set it (see routers/analysis_jobs.py).
+    walkthrough_id = Column(String(36), ForeignKey("capture_sessions.id"), nullable=True, index=True)
+
+
+class CaptureSession(Base):
+    """A numbered, sequential capture round for a project — exposed to the UI
+    everywhere as a "Walkthrough". Generic by design: `session_type` is the
+    extensibility seam (mirrors Marker.marker_type in the Issue Management
+    feature), so a future "Inspection Session" or "Punch List Round" is a new
+    session_type value and zero schema change. Uniqueness is enforced in the
+    DB — (project_id, session_type, number) — so numbers can never be skipped
+    or duplicated, and a project can't have two walkthroughs of the same type.
+
+    Rows are NEVER auto-created: a walkthrough exists only after an explicit
+    POST /projects/{id}/walkthroughs."""
+    __tablename__ = "capture_sessions"
+    __table_args__ = (
+        UniqueConstraint("project_id", "session_type", "number",
+                         name="uq_capture_session_project_type_number"),
+    )
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    session_type = Column(String(30), default="walkthrough", nullable=False)
+    number = Column(Integer, nullable=False)
+    status = Column(Enum(WalkthroughStatus), default=WalkthroughStatus.draft, nullable=False)
+    started_at = Column(DateTime, nullable=True)      # set on first capture (draft -> capturing)
+    ready_at = Column(DateTime, nullable=True)        # set on request-complete
+    completed_at = Column(DateTime, nullable=True)    # set on final confirm — walkthrough becomes read-only
+    ai_started_at = Column(DateTime, nullable=True)
+    ai_completed_at = Column(DateTime, nullable=True)
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
