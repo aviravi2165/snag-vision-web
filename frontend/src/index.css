@@ -323,6 +323,43 @@
 /* ─── Spinner ────────────────────────────────────────────────────────────────── */
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Construction dashboard palette */
+:root {
+  --bg-base: #F7F9FC;
+  --bg-surface: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-hover: #F1F5FB;
+  --bg-secondary: #FBFCFE;
+  --border: #E3EAF3;
+  --border-dim: #EDF1F6;
+  --border-strong: #CBD7E6;
+  --accent: #2F6FED;
+  --accent-dark: #1F5FD5;
+  --accent-light: #EAF2FF;
+  --accent-mid: #BFD5FF;
+  --charcoal: #13264B;
+  --charcoal-mid: #243B64;
+  --text-1: #13264B;
+  --text-2: #344563;
+  --text-3: #64748B;
+  --text-4: #94A3B8;
+  --success-bg: #EAF7F2;
+  --success-text: #16856F;
+  --success-border: #BCE7DC;
+  --warning-bg: #FFF6E5;
+  --warning-text: #C98012;
+  --warning-border: #F6D69D;
+  --danger-bg: #FFF0EA;
+  --danger-text: #D96A32;
+  --danger-border: #F6C6AF;
+  --info-bg: #EAF2FF;
+  --info-text: #2F6FED;
+  --info-border: #BFD5FF;
+  --amber: #2F6FED;
+  --amber-glow: #EAF2FF;
+  --amber-dim: #BFD5FF;
+}
+
 /* ─── Site Photo Viewer marker pins (components/markers/MarkerLayer.jsx) ────── */
 @keyframes markerPulse {
   0%, 100% { transform: translateY(0); }

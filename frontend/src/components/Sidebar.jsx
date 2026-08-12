@@ -3,14 +3,14 @@ import { useAuth } from '../hooks/useAuth'
 import { useProject } from '../hooks/useProject'
 
 const links = [
-  { to: '/dashboard', icon: '▦',  label: 'Executive'    },
-  { to: '/floors',    icon: '⊟',  label: 'Floor view'   },
-  { to: '/analysis',  icon: '◈',  label: 'AI analysis'  },
-  { to: '/upload',    icon: '↑',   label: 'Upload'       },
-  { to: '/panorama',  icon: '🔭',  label: 'Panorama'     },
-  { to: '/site-capture', icon: '📸', label: 'Site Capture' },
-  { to: '/site-setup',   icon: '📐', label: 'Layout Setup' },
-  { to: '/projects',  icon: '⚙',  label: 'Projects'     },
+  { to: '/dashboard', icon: '',  label: 'Dashboard'    },
+  { to: '/floors',    icon: '',  label: 'Floor View'   },
+  { to: '/analysis',  icon: '',  label: 'AI analysis'  },
+  { to: '/upload',    icon: '',   label: 'Upload'       },
+  { to: '/panorama',  icon: '',  label: 'Panorama'     },
+  { to: '/site-capture', icon: '', label: 'Site Capture' },
+  { to: '/site-setup',   icon: '', label: 'Layout Setup' },
+  { to: '/projects',  icon: '',  label: 'Projects'     },
 ]
 
 export default function Sidebar() {
@@ -20,18 +20,18 @@ export default function Sidebar() {
   return (
     <aside style={{
       width: 212, flexShrink: 0,
-      background: '#FFFFFF',
-      borderRight: '1px solid #E5E5E5',
+      background: 'var(--bg-surface)',
+      borderRight: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column',
       minHeight: '100vh', position: 'sticky', top: 0,
     }}>
       {/* Brand */}
       <div style={{
         padding: '18px 16px 14px',
-        borderBottom: '1px solid #EBEAE6',
+        borderBottom: '1px solid var(--border-dim)',
       }}>
         <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700,
-          fontSize: 15, color: '#111111', letterSpacing: '-0.03em' }}>
+          fontSize: 15, color: 'var(--text-1)', letterSpacing: '-0.03em' }}>
           Vestigia
         </div>
         <div style={{ fontSize: 10, color: '#999999', letterSpacing: '.05em' }}>
@@ -50,10 +50,10 @@ export default function Sidebar() {
             value={selectedProject?.id || ''}
             onChange={e => switchProject(e.target.value)}
             style={{
-              width: '100%', background: '#F8F7F4',
-              border: '1px solid #E5E5E5', borderRadius: 8,
+              width: '100%', background: 'var(--bg-secondary)',
+              border: '1px solid var(--border)', borderRadius: 8,
               padding: '7px 10px', fontSize: 12,
-              color: '#111111', cursor: 'pointer',
+              color: 'var(--text-1)', cursor: 'pointer',
             }}
           >
             {projects.map(p => (
@@ -91,20 +91,20 @@ export default function Sidebar() {
       </nav>
 
       {/* User */}
-      <div style={{ padding: '10px 10px 14px', borderTop: '1px solid #EBEAE6' }}>
+      <div style={{ padding: '10px 10px 14px', borderTop: '1px solid var(--border-dim)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10,
-          padding: '8px 10px', background: '#F8F7F4', borderRadius: 8, marginBottom: 4 }}>
+          padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 8, marginBottom: 4 }}>
           <div style={{
             width: 28, height: 28, borderRadius: '50%',
-            background: '#FFEBEE', border: '1.5px solid #FFCDD2',
+            background: 'var(--accent-light)', border: '1.5px solid var(--accent-mid)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 12, fontWeight: 700, color: '#D32F2F',
+            fontSize: 12, fontWeight: 700, color: 'var(--accent)',
             fontFamily: 'Space Grotesk, sans-serif',
           }}>
             {user?.name?.charAt(0) || 'U'}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#111111',
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {user?.name}
             </div>

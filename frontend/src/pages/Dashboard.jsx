@@ -107,10 +107,10 @@ function DashboardClassic() {
               <Tooltip content={<LightTooltip />} />
               <Line
                 type="monotone" dataKey="pct"
-                stroke="#D32F2F" strokeWidth={2.5}
-                dot={{ r: 4, fill: '#D32F2F', stroke: '#FFFFFF', strokeWidth: 2 }}
+                stroke="#2F6FED" strokeWidth={2.5}
+                dot={{ r: 4, fill: '#2F6FED', stroke: '#FFFFFF', strokeWidth: 2 }}
                 connectNulls={false}
-                activeDot={{ r: 6, fill: '#D32F2F' }}
+                activeDot={{ r: 6, fill: '#2F6FED' }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -127,7 +127,7 @@ function DashboardClassic() {
               <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666666' }}
                 axisLine={false} tickLine={false} />
               <Tooltip content={<LightTooltip />} />
-              <Bar dataKey="pct" fill="#111111" radius={[4, 4, 0, 0]} opacity={0.85} />
+              <Bar dataKey="pct" fill="#2F6FED" radius={[4, 4, 0, 0]} opacity={0.85} />
             </BarChart>
           </ResponsiveContainer>
         </div>

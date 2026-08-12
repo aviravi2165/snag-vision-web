@@ -43,10 +43,10 @@ function statusFor(val) {
   return 'Not Started'
 }
 const STATUS_COLOR = {
-  'Work Completed': '#22C55E',
-  'In Progress':     '#F5A623',
-  'Not Started':     '#EF4444',
-  'Cannot Assess':   '#9CA3AF',
+  'Work Completed': '#16856F',
+  'In Progress':     '#2F6FED',
+  'Not Started':     '#D96A32',
+  'Cannot Assess':   '#94A3B8',
 }
 
 const LightTooltip = ({ active, payload, label }) => {
@@ -266,12 +266,12 @@ export default function DashboardNew() {
         <>
           {/* KPI row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
-            <KpiCard value={`${Math.round(kpis.overall)}%`} label="Overall Completion" color="#D32F2F" big />
-            <KpiCard value={kpis.completed} label="Work Completed" color="#22C55E" />
-            <KpiCard value={kpis.inProgress} label="In Progress" color="#F5A623" />
-            <KpiCard value={kpis.notStarted} label="Not Started" color="#EF4444" />
-            <KpiCard value={kpis.cannotAssess} label="Cannot Assess" color="#9CA3AF" />
-            <KpiCard value={kpis.delayed} label="Delayed" color="#DC2626" />
+            <KpiCard value={`${Math.round(kpis.overall)}%`} label="Overall Completion" color="#2F6FED" big />
+            <KpiCard value={kpis.completed} label="Work Completed" color="#16856F" />
+            <KpiCard value={kpis.inProgress} label="In Progress" color="#2F6FED" />
+            <KpiCard value={kpis.notStarted} label="Not Started" color="#D96A32" />
+            <KpiCard value={kpis.cannotAssess} label="Cannot Assess" color="#94A3B8" />
+            <KpiCard value={kpis.delayed} label="Delayed" color="#D96A32" />
             <KpiCard value={kpis.locationsProcessed} label="Locations Processed" color="#2563EB" />
             <KpiCard value={kpis.totalActivities} label="Total Activities" color="#7C3AED" />
           </div>

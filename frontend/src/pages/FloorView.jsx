@@ -8,11 +8,11 @@ import FloorViewNew from './FloorViewNew'
 const NEW_FLOORVIEW_KEY = 'vestigia_new_floorview_enabled'
 
 function heatStyle(pct) {
-  if (pct >= 95) return { bg: 'rgba(34,197,94,.12)', border: 'rgba(34,197,94,.25)', text: '#4ADE80' }
-  if (pct >= 80) return { bg: 'rgba(34,197,94,.07)', border: 'rgba(34,197,94,.15)', text: '#86EFAC' }
-  if (pct >= 60) return { bg: 'rgba(245,166,35,.1)', border: 'rgba(245,166,35,.2)', text: '#FCD34D' }
-  if (pct >= 40) return { bg: 'rgba(249,115,22,.1)', border: 'rgba(249,115,22,.2)', text: '#FB923C' }
-  return { bg: 'rgba(239,68,68,.1)', border: 'rgba(239,68,68,.2)', text: '#F87171' }
+  if (pct >= 95) return { bg: '#EAF7F2', border: '#BCE7DC', text: '#16856F' }
+  if (pct >= 80) return { bg: '#EAF7F8', border: '#BCE4E8', text: '#2D879B' }
+  if (pct >= 60) return { bg: '#F2EDFF', border: '#D7C8FF', text: '#7655C8' }
+  if (pct >= 40) return { bg: '#EAF2FF', border: '#BFD5FF', text: '#2F6FED' }
+  return { bg: '#FFF0EA', border: '#F6C6AF', text: '#D96A32' }
 }
 
 function FloorViewClassic() {
@@ -159,9 +159,9 @@ function FloorViewClassic() {
                   {/* Legend */}
                   <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                     {[
-                      ['#4ADE80', '≥95% Complete'],
-                      ['#FCD34D', '50–94% In progress'],
-                      ['#F87171', '<50% Delayed'],
+                      ['#16856F', '≥95% Complete'],
+                      ['#2F6FED', '50–94% In progress'],
+                      ['#D96A32', '<50% Delayed'],
                     ].map(([c, t]) => (
                       <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-3)' }}>
                         <div style={{ width: 10, height: 10, borderRadius: 3, background: c + '33', border: `1px solid ${c}66` }} />
