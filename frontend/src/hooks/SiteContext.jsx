@@ -155,16 +155,24 @@ export function SiteProvider({ children }) {
       })
       setHotspots(hotspotsOut)
 
+      // Captures are walkthrough-scoped: a dot only glows green if it was
+      // captured in the CURRENT walkthrough. Completed/other walkthroughs'
+      // captures never leak in — the moment a walkthrough completes (or a new
+      // one starts) every dot is red again, ready for re-capture.
       const caps = {}
-      for (const hs of hotspotsOut) {
-        const cap = await getHotspotCaptureApi(hs.id).then(r => r.data).catch(() => null)
-        if (cap?.image_url) caps[hs.id] = cap.image_url
+      const wtId = currentWalkthrough?.id
+      if (wtId) {
+        for (const hs of hotspotsOut) {
+          const cap = await getHotspotCaptureApi(hs.id, { walkthrough_id: wtId })
+            .then(r => r.data).catch(() => null)
+          if (cap?.image_url) caps[hs.id] = cap.image_url
+        }
       }
       if (!cancelled) setCapturedImages(caps)
     }
     restoreFloor()
     return () => { cancelled = true }
-  }, [selectedProject, selectedFloor])
+  }, [selectedProject, selectedFloor, currentWalkthrough])
 
   // ── Upload floor plan (scoped to current floor) ─────────────────────────────
   const uploadFloorPlan = useCallback(async (file) => {

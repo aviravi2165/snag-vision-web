@@ -27,7 +27,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useProject } from '../hooks/useProject'
-import { getProgressMatrix } from '../utils/api'
+import { getProgressMatrix, getIssues } from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -83,6 +83,7 @@ export default function DashboardNew() {
 
   const [selectedFloor, setSelectedFloor] = useState('all')
   const [showActivityModal, setShowActivityModal] = useState(false)
+  const [openIssues, setOpenIssues] = useState(0)   // open snags for the project
 
   // ── Load the pre-aggregated matrix — one call instead of the old
   // Floor→Unit→Room→getChangeDetection waterfall. ──────────────────────────
@@ -103,6 +104,22 @@ export default function DashboardNew() {
       }
     }
     load()
+    return () => { cancelled = true }
+  }, [selectedProject])
+
+  // ── Open issues (snags) — status open or in_progress ─────────────────────
+  useEffect(() => {
+    let cancelled = false
+    async function loadIssues() {
+      if (!selectedProject) return
+      try {
+        const { data } = await getIssues({ project_id: selectedProject.id })
+        if (cancelled) return
+        const open = (data || []).filter(i => i.status === 'open' || i.status === 'in_progress').length
+        setOpenIssues(open)
+      } catch { /* issues are a bonus KPI — never block the dashboard */ }
+    }
+    loadIssues()
     return () => { cancelled = true }
   }, [selectedProject])
 
@@ -160,32 +177,27 @@ export default function DashboardNew() {
   }, [activityNames, filteredLocations, cellValue])
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
+  // Activity-level: har activity ka saare locations ka average nikal ke status
+  // decide karte hain — ek activity ko sirf ek baar count kiya jata hai.
   const kpis = useMemo(() => {
     let completed = 0, inProgress = 0, notStarted = 0, cannotAssess = 0, delayed = 0
     const numericValues = []
-    const processedLocations = new Set()
     activityNames.forEach(a => {
       const vals = (matrix[a] || []).map(c => c.value).filter(v => typeof v === 'number')
       const avg = vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : null
+      const status = statusFor(avg)
+      if (status === 'Work Completed') completed++
+      else if (status === 'In Progress') inProgress++
+      else if (status === 'Not Started') notStarted++
+      else cannotAssess++
       if (isDelayed(a, avg)) delayed++
-      matrix[a]?.forEach(({ location, value }) => {
-        const status = statusFor(value)
-        if (status === 'Work Completed') completed++
-        else if (status === 'In Progress') inProgress++
-        else if (status === 'Not Started') notStarted++
-        else cannotAssess++
-        if (typeof value === 'number') {
-          numericValues.push(value)
-          processedLocations.add(location.unit_id)
-        }
-      })
+      numericValues.push(...vals)
     })
     const overall = numericValues.length
       ? numericValues.reduce((a, b) => a + b, 0) / numericValues.length
       : 0
     return {
       overall, completed, inProgress, notStarted, cannotAssess, delayed,
-      locationsProcessed: processedLocations.size,
       totalActivities: activityNames.length,
     }
   }, [activityNames, matrix, isDelayed])
@@ -281,13 +293,11 @@ export default function DashboardNew() {
           {/* KPI row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
             <KpiCard value={`${Math.round(kpis.overall)}%`} label="Overall Completion" color="#2F6FED" big />
-            <KpiCard value={kpis.completed} label="Work Completed" color="#16856F" />
-            <KpiCard value={kpis.inProgress} label="In Progress" color="#2F6FED" />
-            <KpiCard value={kpis.notStarted} label="Not Started" color="#D96A32" />
-            <KpiCard value={kpis.cannotAssess} label="Cannot Assess" color="#94A3B8" />
-            <KpiCard value={kpis.delayed} label="Delayed" color="#D96A32" />
-            <KpiCard value={kpis.locationsProcessed} label="Locations Processed" color="#2563EB" />
             <KpiCard value={kpis.totalActivities} label="Total Activities" color="#7C3AED" />
+            <KpiCard value={kpis.completed} label="Activities Completed" color="#16856F" />
+            <KpiCard value={kpis.inProgress} label="In Progress" color="#2F6FED" />
+            <KpiCard value={kpis.cannotAssess} label="Cannot Assess" color="#94A3B8" />
+            <KpiCard value={openIssues} label="Open Issues (Snag)" color="#DC2626" />
           </div>
 
           {/* Activity completion + Summary */}

@@ -7,6 +7,7 @@ const links = [
   { to: '/floors',    icon: '',  label: 'Floor View'   },
   { to: '/analysis',  icon: '',  label: 'AI analysis'  },
   { to: '/upload',    icon: '',   label: 'Upload'       },
+  { to: '/issues',    icon: '',  label: 'Issues'       },
   { to: '/panorama',  icon: '',  label: 'Panorama'     },
   { to: '/site-capture', icon: '', label: 'Site Capture' },
   { to: '/site-setup',   icon: '', label: 'Layout Setup' },

@@ -11,6 +11,7 @@ import AnalysisPage from './pages/Analysis'
 import Projects from './pages/Projects'
 import { ProjectProvider } from './hooks/useProject'
 import PanoramaViewer from './pages/PanoramaViewer'
+import Issues from './pages/Issues'
 import { SiteProvider } from './hooks/SiteContext'
 import SiteSetup   from './pages/SiteSetup'
 import SiteCapture from './pages/SiteCapture'
@@ -46,6 +47,7 @@ function AppRoutes() {
       <Route path="/floors" element={<ProtectedRoute><FloorView /></ProtectedRoute>} />
       <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
       <Route path="/analysis" element={<ProtectedRoute><AnalysisPage /></ProtectedRoute>} />
+      <Route path="/issues" element={<ProtectedRoute><Issues /></ProtectedRoute>} />
       <Route path="/panorama" element={<ProtectedRoute><PanoramaViewer /></ProtectedRoute>} />
       <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
       <Route path="/site-setup"   element={<ProtectedRoute><SiteSetup /></ProtectedRoute>} />
