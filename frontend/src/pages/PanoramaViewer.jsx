@@ -16,6 +16,7 @@
  */
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import * as THREE from 'three'
 import toast from 'react-hot-toast'
 import { useProject } from '../hooks/useProject'
@@ -510,7 +511,7 @@ function useImageCascade(projectId) {
 
 function FilterPanel({
   title, cascade, viewerHeight = 560,
-  projectId, panelKey, drawer, openDrawer, closeDrawer,
+  projectId, panelKey, drawer, openDrawer, closeDrawer, initialIssueId = null,
 }) {
   const { floors, floorId, setFloorId, units, unitId, setUnitId, unitsLoading,
     rooms, roomId, setRoomId, dateOptions, dateKey, setDateKey,
@@ -601,6 +602,17 @@ function FilterPanel({
     })
     setPendingFocusIssueId(issue.id)
   }, [roomId, activeUpload, navigateTo, openDrawer, panelKey])
+
+  // Deep link: /panorama?issue=<id> auto-selects that issue once loaded — the
+  // same click-an-issue flow the Issues page triggers (360 viewer + pin +
+  // details drawer, exactly as in Panorama).
+  const initialHandled = useRef(false)
+  useEffect(() => {
+    if (initialHandled.current || !initialIssueId || !issues.length) return
+    initialHandled.current = true
+    const issue = issues.find(i => i.id === initialIssueId)
+    if (issue) selectIssue(issue)
+  }, [initialIssueId, issues, selectIssue])
 
   // Fires once the cascade has actually landed on the target spot with an
   // image loaded — i.e. navigation is visibly complete, not just requested.
@@ -843,6 +855,8 @@ function FloatingAction({ onClick, children }) {
 
 export default function PanoramaViewer() {
   const { selectedProject } = useProject()
+  const [searchParams] = useSearchParams()
+  const initialIssueId = searchParams.get('issue') || null
   const [split, setSplit] = useState(false)
   // Which panel owns the issue drawer, and what it's showing. Hoisted here so
   // that in split comparison only one drawer can be open at a time.
@@ -912,7 +926,8 @@ export default function PanoramaViewer() {
       ) : (
         <FilterPanel cascade={left} viewerHeight={640}
           projectId={selectedProject.id} panelKey="left"
-          drawer={drawer} openDrawer={openDrawer} closeDrawer={closeDrawer} />
+          drawer={drawer} openDrawer={openDrawer} closeDrawer={closeDrawer}
+          initialIssueId={initialIssueId} />
       )}
     </div>
   )
