@@ -14,7 +14,10 @@ from schemas.models import (
 from services.progress_service import build_dashboard
 from services.gcs_service import upload_media, download_media
 from services.excel_service import parse_activity_excel, match_unit_columns
-from services.mapping_service import generate_ai_mapping
+from services.mapping_service import (
+    generate_ai_mapping, unit_activity_matrix_as_of, analysis_dates_for_project,
+    progress_series,
+)
 from services.activity_catalog import STANDARD_ACTIVITIES, refresh_standard_classification
 from routers.auth import get_current_user, require_role
 from typing import List
@@ -314,10 +317,23 @@ def get_unmapped_components(project_id: str, db: Session = Depends(get_db)):
 # level breakdown stays on Floor View.
 
 @router.get("/{project_id}/progress")
-def get_progress_matrix(project_id: str, db: Session = Depends(get_db)):
+def get_progress_matrix(project_id: str, as_of: str = None, db: Session = Depends(get_db)):
+    """Without `as_of`, returns the persisted (latest) UnitActivityProgress
+    cells. With `as_of=YYYY-MM-DD`, returns what those cells looked like at the
+    end of that day — recomputed from the timestamped AIAnalysis history rather
+    than the latest-only table, so "kitna kaam us date tak hua tha" is a real
+    answer, not an extrapolation. `available_dates` lists every date that can
+    be asked for, and is unaffected by `as_of`."""
     p = db.query(Project).get(project_id)
     if not p:
         raise HTTPException(404, "Project not found")
+
+    as_of_date = None
+    if as_of:
+        try:
+            as_of_date = datetime.strptime(as_of, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(400, "as_of must be YYYY-MM-DD")
 
     activities = (
         db.query(Activity).filter(Activity.project_id == project_id)
@@ -334,20 +350,40 @@ def get_progress_matrix(project_id: str, db: Session = Depends(get_db)):
             })
             unit_ids.append(u.id)
 
-    rows = (
-        db.query(UnitActivityProgress).filter(UnitActivityProgress.unit_id.in_(unit_ids)).all()
-        if unit_ids else []
-    )
-    cells = [
-        {
-            "activity_id": r.activity_id, "unit_id": r.unit_id,
-            "pct": r.progress_pct, "confidence": r.confidence_score,
-            "last_analysed": r.last_analysed,
-        }
-        for r in rows
-    ]
+    if as_of_date:
+        cells = unit_activity_matrix_as_of(project_id, unit_ids, as_of_date, db)
+    else:
+        rows = (
+            db.query(UnitActivityProgress).filter(UnitActivityProgress.unit_id.in_(unit_ids)).all()
+            if unit_ids else []
+        )
+        cells = [
+            {
+                "activity_id": r.activity_id, "unit_id": r.unit_id,
+                "pct": r.progress_pct, "confidence": r.confidence_score,
+                "last_analysed": r.last_analysed,
+            }
+            for r in rows
+        ]
 
-    return {"activities": [_activity_out(a) for a in activities], "locations": locations, "cells": cells}
+    return {
+        "activities": [_activity_out(a) for a in activities],
+        "locations": locations,
+        "cells": cells,
+        "available_dates": analysis_dates_for_project(project_id, db),
+        "as_of": as_of_date.isoformat() if as_of_date else None,
+    }
+
+
+@router.get("/{project_id}/progress-series")
+def get_progress_series(project_id: str, db: Session = Depends(get_db)):
+    """Real progress-over-time: one point per capture date, per Unit, replayed
+    from AIAnalysis history in a single pass. Feeds the dashboard's trend
+    chart — every point is measured, none interpolated between captures."""
+    p = db.query(Project).get(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+    return {"series": progress_series(project_id, db)}
 
 
 # ── Floors ────────────────────────────────────────────────────────────────────

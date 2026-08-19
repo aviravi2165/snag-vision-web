@@ -64,7 +64,11 @@ export const updateUnitMap = (projectId, links) =>
   api.put(`/projects/${projectId}/activity-excel/unit-map`, links)
 export const getActivityMapping = (projectId) => api.get(`/projects/${projectId}/activity-mapping`)
 export const getUnmappedComponents = (projectId) => api.get(`/projects/${projectId}/unmapped-components`)
-export const getProgressMatrix = (projectId) => api.get(`/projects/${projectId}/progress`)
+// asOf (YYYY-MM-DD) rewinds the matrix to that date; omit it for the latest.
+export const getProgressMatrix = (projectId, asOf) =>
+  api.get(`/projects/${projectId}/progress`, { params: asOf ? { as_of: asOf } : {} })
+// Real overall-completion history — one measured point per capture date.
+export const getProgressSeries = (projectId) => api.get(`/projects/${projectId}/progress-series`)
 
 // ─── AI Analysis jobs ("Start AI Analysis" — decoupled from upload) ─────────
 export const getPendingAnalysisCount = (projectId) => api.get(`/projects/${projectId}/analysis/pending-count`)

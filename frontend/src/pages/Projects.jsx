@@ -13,12 +13,12 @@ const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13 }}>{title}</div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <input type={type} placeholder={addPlaceholder} value={val}
+        <input type={type} placeholder={addPlaceholder} value={val} min={type === 'number' ? 1 : undefined}
           onChange={e => setVal(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && val) { onAdd(val); setVal('') } }}
+          onKeyDown={e => { if (e.key === 'Enter' && val && (type !== 'number' || Number(val) > 0)) { onAdd(val); setVal('') } }}
           style={{ flex: 1 }} />
         <button className="btn-ghost" style={{ whiteSpace: 'nowrap', padding: '8px 12px' }}
-          onClick={() => { if (val) { onAdd(val); setVal('') } }}>+ Add</button>
+          onClick={() => { if (val && (type !== 'number' || Number(val) > 0)) { onAdd(val); setVal('') } }}>+ Add</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {items.length === 0 ? (
@@ -199,7 +199,8 @@ export default function Projects() {
         </div>
         <div>
           <label className="label">Floors</label>
-          <input type="number" value={newProj.total_floors} onChange={e => setNewProj({ ...newProj, total_floors: e.target.value })} />
+          <input type="number" min={1} value={newProj.total_floors}
+            onChange={e => setNewProj({ ...newProj, total_floors: e.target.value === '' ? '' : Math.max(1, Number(e.target.value)) })} />
         </div>
         <div>
           <label className="label">Target date</label>
