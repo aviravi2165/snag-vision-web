@@ -97,6 +97,8 @@ export function Panorama360({
   placementMode = false,  // crosshair + click-to-place
   onPlace,                // (u, v) => void
   focusTo,                // { u, v } — animates the view to centre on this point
+  onView,                 // (yawDeg, pitchDeg) => void — fired whenever the user drags this view
+  syncTo,                 // { yaw, pitch } (degrees) — jump the camera here, e.g. to mirror another panel
 }) {
   const mountRef = useRef(null)
   const rendererRef = useRef(null)
@@ -111,10 +113,12 @@ export function Panorama360({
   const pitch = useRef(0)
   const focusAnim = useRef(null)
   const projectRef = useRef(null)   // lets prop changes re-project without waiting for a frame
+  const applyRotationRef = useRef(null)
   // Latest props for the rAF loop / listeners, which are bound once on mount
   const pointsRef = useRef(points)
   const placementRef = useRef(placementMode)
   const onPlaceRef = useRef(onPlace)
+  const onViewRef = useRef(onView)
   // Re-project as soon as the marker set changes. The rAF loop covers camera
   // movement, but waiting for a frame to show a just-saved marker is both a
   // visible lag and unreliable when the tab isn't compositing.
@@ -124,6 +128,7 @@ export function Panorama360({
   }, [points])
   useEffect(() => { placementRef.current = placementMode }, [placementMode])
   useEffect(() => { onPlaceRef.current = onPlace }, [onPlace])
+  useEffect(() => { onViewRef.current = onView }, [onView])
 
   const [projected, setProjected] = useState([])
 
@@ -184,6 +189,7 @@ export function Panorama360({
       camera.rotation.y = THREE.MathUtils.degToRad(yaw.current)
       camera.rotation.x = THREE.MathUtils.degToRad(pitch.current)
     }
+    applyRotationRef.current = applyRotation
 
     const animate = () => {
       frameRef.current = requestAnimationFrame(animate)
@@ -252,6 +258,7 @@ export function Panorama360({
       pitch.current -= dy * 0.3
       pitch.current = Math.max(-85, Math.min(85, pitch.current))
       applyRotation()
+      if (didDrag.current) onViewRef.current?.(yaw.current, pitch.current)
     }
     const onUp = e => {
       const wasDragging = isDragging.current
@@ -321,6 +328,17 @@ export function Panorama360({
       pitch: Math.max(-85, Math.min(85, focusTo.v * 180 - 90)),
     }
   }, [focusTo])
+
+  // Mirror another panel's camera (split comparison sync). Applied directly,
+  // not eased — this fires continuously while the other panel is being
+  // dragged, so a direct jump tracks the drag 1:1 instead of lagging behind.
+  useEffect(() => {
+    if (!syncTo) return
+    focusAnim.current = null
+    yaw.current = syncTo.yaw
+    pitch.current = Math.max(-85, Math.min(85, syncTo.pitch))
+    applyRotationRef.current?.()
+  }, [syncTo])
 
   return (
     <div ref={mountRef} style={{
@@ -512,6 +530,7 @@ function useImageCascade(projectId) {
 function FilterPanel({
   title, cascade, viewerHeight = 560,
   projectId, panelKey, drawer, openDrawer, closeDrawer, initialIssueId = null,
+  onOrientationChange, syncOrientation, // split-comparison camera sync (equirect panoramas only)
 }) {
   const { floors, floorId, setFloorId, units, unitId, setUnitId, unitsLoading,
     rooms, roomId, setRoomId, dateOptions, dateKey, setDateKey,
@@ -749,6 +768,7 @@ function FilterPanel({
             <Panorama360
               src={activeUpload.gcs_url} height={viewerHeight}
               points={points} placementMode={isPlacing} onPlace={handlePlace} focusTo={focusTo}
+              onView={onOrientationChange} syncTo={syncOrientation}
             >
               {renderMarkers}
             </Panorama360>
@@ -891,6 +911,16 @@ export default function PanoramaViewer() {
 
   const toggleSplit = useCallback(() => setSplit(s => !s), [])
 
+  // Synchronized panorama movement: both panels show the same room, so while
+  // split, dragging either one's 360° view should rotate the other by the
+  // same amount. `orientation` tracks the last drag's {panel, yaw, pitch};
+  // each panel is only fed the sync target when it *wasn't* the source, so a
+  // panel never fights its own drag.
+  const [orientation, setOrientation] = useState(null)
+  const handleLeftView = useCallback((yaw, pitch) => setOrientation({ panel: 'left', yaw, pitch }), [])
+  const handleRightView = useCallback((yaw, pitch) => setOrientation({ panel: 'right', yaw, pitch }), [])
+  useEffect(() => { setOrientation(null) }, [split])
+
   return (
     <div style={{ padding: 28, maxWidth: 1800 }}>
       <div style={{
@@ -918,10 +948,14 @@ export default function PanoramaViewer() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <FilterPanel title="Image 1" cascade={left} viewerHeight={520}
             projectId={selectedProject.id} panelKey="left"
-            drawer={drawer} openDrawer={openDrawer} closeDrawer={closeDrawer} />
+            drawer={drawer} openDrawer={openDrawer} closeDrawer={closeDrawer}
+            onOrientationChange={handleLeftView}
+            syncOrientation={orientation?.panel === 'right' ? orientation : null} />
           <FilterPanel title="Image 2" cascade={right} viewerHeight={520}
             projectId={selectedProject.id} panelKey="right"
-            drawer={drawer} openDrawer={openDrawer} closeDrawer={closeDrawer} />
+            drawer={drawer} openDrawer={openDrawer} closeDrawer={closeDrawer}
+            onOrientationChange={handleRightView}
+            syncOrientation={orientation?.panel === 'left' ? orientation : null} />
         </div>
       ) : (
         <FilterPanel cascade={left} viewerHeight={640}

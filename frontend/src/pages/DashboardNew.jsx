@@ -14,12 +14,19 @@
  * Unit's own Areas (Living/Bathroom, the `Room` model). Area-level breakdown
  * stays on the Floor View page — this dashboard never duplicates it.
  *
- * Trade-off worth knowing: UnitActivityProgress only stores the LATEST value
- * per (Unit, activity) — there is no per-date history in the new pipeline
- * (raw AIAnalysis.components are keyed by Gemini's own open vocabulary, not
- * by activity, so a historical "as of" comparison can't be reconstructed
- * client-side without re-implementing the mapping server does). The old
- * pipeline's date picker / multi-point trend are dropped rather than faked.
+ * Date selector: UnitActivityProgress only stores the LATEST value per (Unit,
+ * activity), so an "as of <date>" view can't be reconstructed client-side.
+ * The history does exist server-side though — AIAnalysis rows are timestamped
+ * — so picking a date refetches with ?as_of=YYYY-MM-DD and the backend
+ * replays that history through the same mapping (see
+ * services/mapping_service.py::unit_activity_matrix_as_of). Every KPI, chart
+ * and the activity table derive from `cells`, so they all move together; no
+ * value is interpolated between capture dates.
+ *
+ * The "Progress over time" trend comes from GET /projects/{id}/progress-series
+ * — one measured point per capture date, replayed from the same history in a
+ * single pass. It is fetched once per project and truncated client-side at the
+ * selected date, so changing the date picker doesn't refetch it.
  *
  * Nothing here is fabricated: if an activity has never been scored for a
  * location it shows as "Cannot Assess" (null), not a guessed number.
@@ -27,7 +34,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useProject } from '../hooks/useProject'
-import { getProgressMatrix, getIssues } from '../utils/api'
+import { getProgressMatrix, getProgressSeries, getIssues } from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -36,16 +43,9 @@ import {
 
 const COMPLETED_AT = 95   // >= this % counts as "Work Completed"
 
-// Bar fill + track as specified: solid blue on a very light blue track.
-const BAR_FILL = '#2563EB'
+// Bar fill + track as specified: light blue on a very light blue track.
+const BAR_FILL = '#60A5FA'
 const BAR_TRACK = '#EAF2FF'
-
-// Weekly trend points (same series the classic dashboard shows: W1–W5 + Now).
-const weeklyTrend = [
-  { week: 'W1', pct: 30 }, { week: 'W2', pct: 45 },
-  { week: 'W3', pct: 60 }, { week: 'W4', pct: 75 },
-  { week: 'W5', pct: 83 }, { week: 'Now', pct: null },
-]
 
 function statusFor(val) {
   if (val === null || val === undefined) return 'Cannot Assess'
@@ -85,8 +85,19 @@ export default function DashboardNew() {
   const [showActivityModal, setShowActivityModal] = useState(false)
   const [openIssues, setOpenIssues] = useState(0)   // open snags for the project
 
+  // Capture dates this project can be rewound to (newest first, from the
+  // server). `asOf` null = latest; the dropdown still shows the latest date
+  // rather than a vague "Latest", so what you're looking at is never ambiguous.
+  const [availableDates, setAvailableDates] = useState([])
+  const [asOf, setAsOf] = useState(null)
+
+  // Switching project must not leave the previous project's date selected.
+  useEffect(() => { setAsOf(null); setAvailableDates([]) }, [selectedProject])
+
   // ── Load the pre-aggregated matrix — one call instead of the old
-  // Floor→Unit→Room→getChangeDetection waterfall. ──────────────────────────
+  // Floor→Unit→Room→getChangeDetection waterfall. Refetches on date change:
+  // rewinding is a server-side replay of AIAnalysis history, not a client
+  // filter (the matrix has no date dimension to filter on). ────────────────
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -94,16 +105,35 @@ export default function DashboardNew() {
       if (!selectedProject) return
       setLoading(true)
       try {
-        const { data } = await getProgressMatrix(selectedProject.id)
+        const { data } = await getProgressMatrix(selectedProject.id, asOf)
         if (cancelled) return
         setActivities(data.activities)
         setLocations(data.locations)
         setCells(data.cells)
+        setAvailableDates(data.available_dates || [])
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
     load()
+    return () => { cancelled = true }
+  }, [selectedProject, asOf])
+
+  // ── Real progress history for the trend chart ────────────────────────────
+  // Independent of `asOf`: the series is the full history, and the chart
+  // truncates it client-side so changing the date doesn't refetch it.
+  const [series, setSeries] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    async function loadSeries() {
+      setSeries([])
+      if (!selectedProject) return
+      try {
+        const { data } = await getProgressSeries(selectedProject.id)
+        if (!cancelled) setSeries(data.series || [])
+      } catch { /* trend is secondary — never block the dashboard */ }
+    }
+    loadSeries()
     return () => { cancelled = true }
   }, [selectedProject])
 
@@ -133,12 +163,15 @@ export default function DashboardNew() {
     (name) => activities.find(a => a.name === name)?.target_date || null,
     [activities]
   )
-  // Overdue: has a target date in the past and isn't fully complete yet
+  // Overdue: target date already passed *as of the date being viewed* and the
+  // work wasn't complete yet. Judged against `asOf` rather than today so a
+  // rewound dashboard doesn't flag activities that still had time left then.
+  const asOfOrToday = asOf || todayIso()
   const isDelayed = useCallback((name, pct) => {
     const target = targetDateFor(name)
     if (!target) return false
-    return target < todayIso() && (pct === null || pct < COMPLETED_AT)
-  }, [targetDateFor])
+    return target < asOfOrToday && (pct === null || pct < COMPLETED_AT)
+  }, [targetDateFor, asOfOrToday])
 
   const floors = useMemo(() => {
     const seen = new Map()
@@ -226,6 +259,25 @@ export default function DashboardNew() {
       .sort((a, b) => String(a.unitNo).localeCompare(String(b.unitNo), undefined, { numeric: true }))
   ), [filteredLocations, activityNames, cellValue])
 
+  // ── Progress over time — one measured point per capture date ────────────
+  // Re-weighted by each Unit's cell count (`n`) rather than averaging the
+  // per-Unit averages, so this matches the Overall Completion KPI's
+  // cell-level mean. Honours the Floor filter and stops at the selected date.
+  const trendChart = useMemo(() => {
+    const visibleUnitIds = new Set(filteredLocations.map(l => l.unit_id))
+    return series
+      .filter(pt => pt.date <= asOfOrToday)
+      .map(pt => {
+        const units = pt.units.filter(u => visibleUnitIds.has(u.unit_id))
+        const cells = units.reduce((n, u) => n + u.n, 0)
+        return {
+          date: pt.date,
+          label: new Date(pt.date + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+          pct: cells ? Math.round((units.reduce((s, u) => s + u.pct * u.n, 0) / cells) * 10) / 10 : null,
+        }
+      })
+  }, [series, filteredLocations, asOfOrToday])
+
   const summaryData = [
     { name: 'Work Completed', value: kpis.completed, color: STATUS_COLOR['Work Completed'] },
     { name: 'In Progress',    value: kpis.inProgress, color: STATUS_COLOR['In Progress'] },
@@ -243,7 +295,9 @@ export default function DashboardNew() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${selectedProject?.name || 'project'}-activity-progress.csv`
+    // Stamp the export with the date it reflects — an as-of CSV is otherwise
+    // indistinguishable from a latest one.
+    a.download = `${selectedProject?.name || 'project'}-activity-progress-${asOf || availableDates[0] || 'latest'}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -279,13 +333,39 @@ export default function DashboardNew() {
         </div>
       </div>
 
-      {/* Floor filter */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {/* Floor + date filters */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <label className="label" style={{ margin: 0 }}>Floor</label>
         <select value={selectedFloor} onChange={e => setSelectedFloor(e.target.value)} style={{ width: 'auto' }}>
           <option value="all">All floors</option>
           {floors.map(f => <option key={f.id} value={f.id}>Floor {f.floor_number}</option>)}
         </select>
+
+        <label className="label" style={{ margin: '0 0 0 10px' }}>Progress as of</label>
+        <select
+          value={asOf || availableDates[0] || ''}
+          onChange={e => setAsOf(e.target.value || null)}
+          disabled={!availableDates.length}
+          style={{ width: 'auto' }}
+        >
+          {availableDates.length === 0 ? (
+            <option value="">No captures yet</option>
+          ) : availableDates.map((d, i) => (
+            <option key={d} value={d}>
+              {new Date(d + 'T00:00:00').toLocaleDateString()}{i === 0 ? ' (latest)' : ''}
+            </option>
+          ))}
+        </select>
+
+        {/* Rewound views are easy to mistake for the live dashboard — say so. */}
+        {asOf && availableDates[0] && asOf !== availableDates[0] && (
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: '#92400E', background: '#FEF3C7',
+            border: '1px solid #FDE68A', borderRadius: 20, padding: '3px 10px',
+          }}>
+            Showing progress as of {new Date(asOf + 'T00:00:00').toLocaleDateString()} — not the latest
+          </span>
+        )}
       </div>
 
       {loading ? <Spinner /> : (
@@ -374,7 +454,7 @@ export default function DashboardNew() {
                           angle={-40} textAnchor="end" height={70} interval={0} />
                         <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
                         <Tooltip content={<LightTooltip />} />
-                        <Bar dataKey="pct" fill="#2563EB" radius={[4, 4, 0, 0]} barSize={24}>
+                        <Bar dataKey="pct" fill={BAR_FILL} radius={[4, 4, 0, 0]} barSize={24}>
                           <LabelList dataKey="pct" position="top"
                             formatter={v => `${v}%`}
                             style={{ fontSize: 10, fill: '#444', fontWeight: 600 }} />
@@ -387,26 +467,37 @@ export default function DashboardNew() {
             </div>
 
             <div className="card">
-              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
-                Weekly progress trend
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, gap: 8 }}>
+                <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 13 }}>
+                  Progress over time
+                </div>
+                <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+                  {trendChart.length === 1 ? '1 capture' : `${trendChart.length} captures`}
+                </span>
               </div>
-              <div style={{ height: 260 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={weeklyTrend}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
-                    <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
-                    <Tooltip content={<LightTooltip />} />
-                    <Line
-                      type="monotone" dataKey="pct"
-                      stroke="#2563EB" strokeWidth={2.5}
-                      dot={{ r: 4, fill: '#2563EB', stroke: '#FFFFFF', strokeWidth: 2 }}
-                      connectNulls={false}
-                      activeDot={{ r: 6, fill: '#2563EB' }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              {trendChart.length === 0 ? (
+                <Empty message="No captures yet" hint="The trend appears once photos have been analysed" />
+              ) : (
+                <div style={{ height: 260 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    {/* One point per capture date — the x-axis is deliberately
+                        categorical: nothing is interpolated between captures. */}
+                    <LineChart data={trendChart}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
+                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+                      <Tooltip content={<LightTooltip />} />
+                      <Line
+                        type="monotone" dataKey="pct"
+                        stroke={BAR_FILL} strokeWidth={2.5}
+                        dot={{ r: 4, fill: BAR_FILL, stroke: '#FFFFFF', strokeWidth: 2 }}
+                        connectNulls={false}
+                        activeDot={{ r: 6, fill: BAR_FILL }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </div>
           </div>
         </>

@@ -20,7 +20,7 @@ computed per Unit, combined-averaging across that Unit's Areas — never
 per-Area — to avoid duplicating (and potentially conflicting with) Floor View.
 """
 import json
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -280,33 +280,88 @@ def resolve_component(project_id: str, component_key: str, db: Session) -> Optio
     return None
 
 
-def _latest_confident_by_activity(area_id: str, project_id: str, threshold: float, db: Session) -> Dict[str, dict]:
+def _latest_confident_by_activity(
+    area_id: str, project_id: str, threshold: float, db: Session,
+    lookup: Optional[Dict[str, str]] = None, cutoff: Optional[datetime] = None,
+) -> Dict[str, dict]:
     """For one Area (Room model), the latest confident value per activity —
     walks its AIAnalysis history, maps each raw component through the
-    project's mapping table, applies confidence_threshold."""
-    analyses = (
-        db.query(AIAnalysis)
-        .filter(AIAnalysis.room_id == area_id)
-        .order_by(AIAnalysis.analysed_at.asc())
-        .all()
-    )
+    project's mapping table, applies confidence_threshold.
+
+    `cutoff` restricts the walk to analyses at or before a point in time, which
+    is what makes an "as of <date>" view possible: the history lives in
+    AIAnalysis (timestamped), even though UnitActivityProgress only persists
+    the latest value. `lookup` swaps the side-effectful resolve_component (which
+    logs UnmappedComponent and commits) for a read-only mapping dict, so GET
+    paths can call this without writing."""
+    q = db.query(AIAnalysis).filter(AIAnalysis.room_id == area_id)
+    if cutoff is not None:
+        q = q.filter(AIAnalysis.analysed_at <= cutoff)
+    analyses = q.order_by(AIAnalysis.analysed_at.asc()).all()
     latest_by_activity: Dict[str, dict] = {}
     for analysis in analyses:
-        components = analysis.components or {}
-        for component_key, value in components.items():
-            if not isinstance(value, dict):
-                continue  # legacy flat-number analyses predate the confidence schema — skip
-            pct = value.get("pct")
-            confidence = value.get("confidence")
-            if pct is None or confidence is None or confidence < threshold:
-                continue
-            activity_id = resolve_component(project_id, component_key, db)
-            if not activity_id:
-                continue
-            latest_by_activity[activity_id] = {
-                "pct": pct, "confidence": confidence, "analysed_at": analysis.analysed_at,
-            }
+        _apply_analysis(analysis, latest_by_activity, project_id, threshold, db, lookup)
     return latest_by_activity
+
+
+def _apply_analysis(
+    analysis: AIAnalysis, state: Dict[str, dict], project_id: str,
+    threshold: float, db: Session, lookup: Optional[Dict[str, str]] = None,
+) -> None:
+    """Fold one analysis into a running latest-confident-per-activity `state`.
+
+    Split out so a chronological walk can be replayed incrementally (the
+    progress *series* snapshots this state at each date boundary in a single
+    pass) instead of re-walking the whole history once per date."""
+    for component_key, value in (analysis.components or {}).items():
+        if not isinstance(value, dict):
+            continue  # legacy flat-number analyses predate the confidence schema — skip
+        pct = value.get("pct")
+        confidence = value.get("confidence")
+        if pct is None or confidence is None or confidence < threshold:
+            continue
+        activity_id = (
+            lookup.get(component_key) if lookup is not None
+            else resolve_component(project_id, component_key, db)
+        )
+        if not activity_id:
+            continue
+        state[activity_id] = {
+            "pct": pct, "confidence": confidence, "analysed_at": analysis.analysed_at,
+        }
+
+
+def _aggregate_unit(
+    unit: Unit, project_id: str, threshold: float, db: Session,
+    lookup: Optional[Dict[str, str]] = None, cutoff: Optional[datetime] = None,
+) -> Dict[str, dict]:
+    """One Unit's combined-average across its own Areas, per activity:
+    activity_id -> {"pct", "confidence", "last_analysed"}. Shared by the
+    persisted rollup and the read-only "as of <date>" view so the two can
+    never drift apart."""
+    pcts_by_activity: Dict[str, List[float]] = {}
+    confidences_by_activity: Dict[str, List[float]] = {}
+    latest_ts_by_activity: Dict[str, datetime] = {}
+
+    for area in unit.rooms:
+        area_values = _latest_confident_by_activity(
+            area.id, project_id, threshold, db, lookup=lookup, cutoff=cutoff
+        )
+        for activity_id, data in area_values.items():
+            pcts_by_activity.setdefault(activity_id, []).append(data["pct"])
+            confidences_by_activity.setdefault(activity_id, []).append(data["confidence"])
+            ts = data["analysed_at"]
+            if activity_id not in latest_ts_by_activity or ts > latest_ts_by_activity[activity_id]:
+                latest_ts_by_activity[activity_id] = ts
+
+    return {
+        activity_id: {
+            "pct": sum(pcts) / len(pcts),
+            "confidence": sum(confidences_by_activity[activity_id]) / len(confidences_by_activity[activity_id]),
+            "last_analysed": latest_ts_by_activity[activity_id],
+        }
+        for activity_id, pcts in pcts_by_activity.items()
+    }
 
 
 def recompute_unit_activity_progress(unit_id: str, db: Session) -> None:
@@ -323,20 +378,7 @@ def recompute_unit_activity_progress(unit_id: str, db: Session) -> None:
         return
     threshold = project.confidence_threshold if project.confidence_threshold is not None else 0.5
 
-    pcts_by_activity: Dict[str, List[float]] = {}
-    confidences_by_activity: Dict[str, List[float]] = {}
-    latest_ts_by_activity: Dict[str, datetime] = {}
-
-    for area in unit.rooms:
-        for activity_id, data in _latest_confident_by_activity(area.id, project.id, threshold, db).items():
-            pcts_by_activity.setdefault(activity_id, []).append(data["pct"])
-            confidences_by_activity.setdefault(activity_id, []).append(data["confidence"])
-            ts = data["analysed_at"]
-            if activity_id not in latest_ts_by_activity or ts > latest_ts_by_activity[activity_id]:
-                latest_ts_by_activity[activity_id] = ts
-
-    for activity_id, pcts in pcts_by_activity.items():
-        confidences = confidences_by_activity[activity_id]
+    for activity_id, data in _aggregate_unit(unit, project.id, threshold, db).items():
         row = (
             db.query(UnitActivityProgress)
             .filter(UnitActivityProgress.unit_id == unit_id, UnitActivityProgress.activity_id == activity_id)
@@ -345,11 +387,143 @@ def recompute_unit_activity_progress(unit_id: str, db: Session) -> None:
         if not row:
             row = UnitActivityProgress(unit_id=unit_id, activity_id=activity_id)
             db.add(row)
-        row.progress_pct = sum(pcts) / len(pcts)
-        row.confidence_score = sum(confidences) / len(confidences)
-        row.last_analysed = latest_ts_by_activity[activity_id]
+        row.progress_pct = data["pct"]
+        row.confidence_score = data["confidence"]
+        row.last_analysed = data["last_analysed"]
         row.updated_at = datetime.utcnow()
     db.commit()
+
+
+def _project_area_ids(project_id: str, db: Session) -> List[str]:
+    """Every Area (Room) hanging off this project's Units — the grain the
+    Executive dashboard's Unit x Activity matrix is built from."""
+    area_ids: List[str] = []
+    for f in db.query(Floor).filter(Floor.project_id == project_id).all():
+        for u in f.units:
+            area_ids.extend(r.id for r in u.rooms)
+    return area_ids
+
+
+def analysis_dates_for_project(project_id: str, db: Session) -> List[str]:
+    """Distinct calendar dates (newest first, ISO) on which this project's
+    Areas were analysed — the set of points in time the dashboard can be
+    rewound to."""
+    area_ids = _project_area_ids(project_id, db)
+    if not area_ids:
+        return []
+    rows = (
+        db.query(AIAnalysis.analysed_at)
+        .filter(AIAnalysis.room_id.in_(area_ids), AIAnalysis.analysed_at.isnot(None))
+        .all()
+    )
+    return sorted({r[0].date().isoformat() for r in rows}, reverse=True)
+
+
+def unit_activity_matrix_as_of(
+    project_id: str, unit_ids: List[str], as_of: date, db: Session
+) -> List[dict]:
+    """Point-in-time equivalent of the persisted UnitActivityProgress rows:
+    what each (Unit, Activity) cell looked like at the end of `as_of`.
+
+    Computed on the fly and never written back — UnitActivityProgress stays
+    the "latest" store. Read-only throughout (mapping via _mapping_lookup, so
+    no UnmappedComponent logging on this GET path)."""
+    project = db.query(Project).get(project_id)
+    if not project or not unit_ids:
+        return []
+    threshold = project.confidence_threshold if project.confidence_threshold is not None else 0.5
+    lookup = _mapping_lookup(project_id, db)
+    cutoff = datetime.combine(as_of, time.max)
+
+    cells: List[dict] = []
+    for unit in db.query(Unit).filter(Unit.id.in_(unit_ids)).all():
+        aggregated = _aggregate_unit(unit, project_id, threshold, db, lookup=lookup, cutoff=cutoff)
+        for activity_id, data in aggregated.items():
+            cells.append({
+                "activity_id": activity_id, "unit_id": unit.id,
+                "pct": data["pct"], "confidence": data["confidence"],
+                "last_analysed": data["last_analysed"],
+            })
+    return cells
+
+
+def _area_snapshots(
+    area_id: str, project_id: str, threshold: float, lookup: Dict[str, str],
+    dates: List[date], db: Session,
+) -> Dict[date, Dict[str, dict]]:
+    """This Area's latest-confident-per-activity state at the end of each date
+    in `dates` (which must be ascending) — ONE pass over its history.
+
+    Calling unit_activity_matrix_as_of once per date would re-walk the whole
+    history for every point on the chart; this walks it once and snapshots as
+    it crosses each date boundary."""
+    analyses = (
+        db.query(AIAnalysis)
+        .filter(AIAnalysis.room_id == area_id)
+        .order_by(AIAnalysis.analysed_at.asc())
+        .all()
+    )
+    snapshots: Dict[date, Dict[str, dict]] = {}
+    state: Dict[str, dict] = {}
+    i = 0
+    for d in dates:
+        cutoff = datetime.combine(d, time.max)
+        while i < len(analyses) and analyses[i].analysed_at <= cutoff:
+            _apply_analysis(analyses[i], state, project_id, threshold, db, lookup)
+            i += 1
+        # Shallow copy: entries are replaced wholesale by _apply_analysis,
+        # never mutated in place, so snapshots stay independent.
+        snapshots[d] = dict(state)
+    return snapshots
+
+
+def progress_series(project_id: str, db: Session) -> List[dict]:
+    """Real overall-completion history: one point per capture date, per Unit.
+
+    Returns [{"date", "units": [{"unit_id", "pct", "n"}]}] where `pct` is that
+    Unit's mean across its assessed activities and `n` is how many activity
+    cells that mean covers. The caller re-weights by `n` (rather than
+    averaging the averages) so a floor-filtered total matches the dashboard's
+    own cell-level mean exactly.
+
+    Read-only and non-persisting, like unit_activity_matrix_as_of."""
+    project = db.query(Project).get(project_id)
+    if not project:
+        return []
+    dates = [date.fromisoformat(d) for d in reversed(analysis_dates_for_project(project_id, db))]
+    if not dates:
+        return []
+    threshold = project.confidence_threshold if project.confidence_threshold is not None else 0.5
+    lookup = _mapping_lookup(project_id, db)
+
+    units = [u for f in db.query(Floor).filter(Floor.project_id == project_id).all() for u in f.units]
+    # unit_id -> date -> [per-activity pct], combined-averaged across the
+    # Unit's Areas exactly as _aggregate_unit does for the latest view.
+    per_unit: Dict[str, Dict[date, Dict[str, List[float]]]] = {}
+    for unit in units:
+        by_date: Dict[date, Dict[str, List[float]]] = {d: {} for d in dates}
+        for area in unit.rooms:
+            snapshots = _area_snapshots(area.id, project_id, threshold, lookup, dates, db)
+            for d, state in snapshots.items():
+                for activity_id, data in state.items():
+                    by_date[d].setdefault(activity_id, []).append(data["pct"])
+        per_unit[unit.id] = by_date
+
+    series: List[dict] = []
+    for d in dates:
+        unit_points = []
+        for unit in units:
+            per_activity = per_unit[unit.id][d]
+            values = [sum(pcts) / len(pcts) for pcts in per_activity.values()]
+            if not values:
+                continue  # nothing assessed for this Unit yet — omit, never zero-fill
+            unit_points.append({
+                "unit_id": unit.id,
+                "pct": sum(values) / len(values),
+                "n": len(values),
+            })
+        series.append({"date": d.isoformat(), "units": unit_points})
+    return series
 
 
 def _project_for_unit(unit: Unit, db: Session) -> Optional[Project]:

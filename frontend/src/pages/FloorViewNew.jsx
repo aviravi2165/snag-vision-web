@@ -48,14 +48,6 @@ function kpiColor(pct) {
   if (pct === null || pct === undefined) return KPI_BANDS[0]
   return KPI_BANDS.find(b => pct < b.max) || KPI_BANDS[KPI_BANDS.length - 1]
 }
-// Vivid bar-fill color (the band's muted `text` color reads as mustard on a progress bar)
-function barColor(pct) {
-  if (pct === null || pct === undefined) return '#94A3B8'
-  if (pct < 40) return '#2F6FED'
-  if (pct < 75) return '#7655C8'
-  return '#16856F'
-}
-
 // Pick the history entry that was current as of `dateKey` (or the latest if dateKey is null)
 function historyAt(history, dateKey) {
   if (!history.length) return null
@@ -233,11 +225,8 @@ export default function FloorViewNew() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* ── Snag-List + Date ── */}
+      {/* ── Date ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
-        <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => toast('Coming soon')}>
-          Snag-List
-        </button>
         <select value={selectedDate || ''} onChange={e => setSelectedDate(e.target.value || null)}
           style={{ width: 'auto', fontSize: 12 }}>
           <option value="">Latest</option>
@@ -415,7 +404,7 @@ export default function FloorViewNew() {
                             </span>
                           </div>
                           <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
-                            <div style={{ height: '100%', width: `${pct || 0}%`, background: barColor(pct), borderRadius: 2 }} />
+                            <div style={{ height: '100%', width: `${pct || 0}%`, background: '#111111', borderRadius: 2 }} />
                           </div>
                           {!selectedDate && latestNotes && (
                             <div style={{ display: 'flex', gap: 6, fontSize: 11, color: 'var(--text-2)', marginBottom: 4 }}>
