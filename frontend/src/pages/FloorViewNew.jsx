@@ -18,7 +18,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import { useProject } from '../hooks/useProject'
 import {
-  getFloors, getUnits, getRooms, getRoomAnalysis, getChangeDetection,
+  getFloors, getUnits, getRooms, getChangeDetection,
   getRoomUploads,
 } from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
@@ -59,6 +59,13 @@ function historyAt(history, dateKey) {
   return picked
 }
 
+// The analysed/completed description as of `dateKey`. Sourced from the history
+// entry itself, so a past date shows what was written then — not the latest
+// note, which would describe work that hadn't happened yet.
+function notesAt(history, dateKey) {
+  return historyAt(history, dateKey)?.ai_notes || null
+}
+
 export default function FloorViewNew() {
   const { selectedProject } = useProject()
 
@@ -66,7 +73,8 @@ export default function FloorViewNew() {
   const [selectedFloor, setSelectedFloor] = useState(null)
   const [loadingFloor,  setLoadingFloor]  = useState(false)
 
-  // { [unitId]: { unit, rooms: [{ room, history, latestNotes }] } }
+  // { [unitId]: { unit, rooms: [{ room, history }] } } — the note for any date
+  // (latest included) comes from `history`, so no separate latest fetch.
   const [unitData,   setUnitData]   = useState({})
 
   const [selectedCategory, setSelectedCategory] = useState('Overall')
@@ -99,8 +107,7 @@ export default function FloorViewNew() {
           const { data: rooms } = await getRooms(unit.id)
           const roomsWithHistory = await Promise.all(rooms.map(async room => {
             const history = await getChangeDetection(room.id).then(r => r.data).catch(() => [])
-            const latest = await getRoomAnalysis(room.id).then(r => r.data).catch(() => null)
-            return { room, history, latestNotes: latest?.ai_notes || null }
+            return { room, history }
           }))
           next[unit.id] = { unit, rooms: roomsWithHistory }
         }
@@ -387,9 +394,10 @@ export default function FloorViewNew() {
                     Room-by-room progress
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-                    {selectedEntry.rooms.map(({ room, history, latestNotes }) => {
+                    {selectedEntry.rooms.map(({ room, history }) => {
                       const { pct } = roomValueFor(room, history, 'Overall')
                       const pending = pendingComponents(room, history)
+                      const notes = notesAt(history, selectedDate)
                       const isFocused = focusedRoomId === room.id
                       return (
                         <div key={room.id} onClick={() => setFocusedRoomId(room.id)} style={{
@@ -406,9 +414,9 @@ export default function FloorViewNew() {
                           <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
                             <div style={{ height: '100%', width: `${pct || 0}%`, background: '#111111', borderRadius: 2 }} />
                           </div>
-                          {!selectedDate && latestNotes && (
+                          {notes && (
                             <div style={{ display: 'flex', gap: 6, fontSize: 11, color: 'var(--text-2)', marginBottom: 4 }}>
-                              <span>✅</span><span>{latestNotes}</span>
+                              <span>✅</span><span>{notes}</span>
                             </div>
                           )}
                           {pending.length > 0 && (
@@ -469,10 +477,12 @@ export default function FloorViewNew() {
                     <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 4 }}>Stage of work</div>
                     <div style={{ fontSize: 13, color: 'var(--text-1)' }}>{bandFor(focusedValue?.pct).label}</div>
                   </div>
-                  {!selectedDate && focusedEntry.latestNotes && (
+                  {notesAt(focusedEntry.history, selectedDate) && (
                     <div>
                       <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 4 }}>Observation</div>
-                      <div style={{ fontSize: 13, color: 'var(--text-2)' }}>{focusedEntry.latestNotes}</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
+                        {notesAt(focusedEntry.history, selectedDate)}
+                      </div>
                     </div>
                   )}
                   <div>

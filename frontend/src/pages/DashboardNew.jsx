@@ -33,6 +33,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useProject } from '../hooks/useProject'
 import { getProgressMatrix, getProgressSeries, getIssues } from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
@@ -75,6 +76,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10)
 
 export default function DashboardNew() {
   const { selectedProject } = useProject()
+  const navigate = useNavigate()
 
   const [activities, setActivities] = useState([])   // [{id, name, start_date, target_date}]
   const [locations,  setLocations]  = useState([])    // [{floor_id, floor_number, unit_id, unit_number}]
@@ -377,7 +379,8 @@ export default function DashboardNew() {
             <KpiCard value={kpis.completed} label="Activities Completed" color="#16856F" />
             <KpiCard value={kpis.inProgress} label="In Progress" color="#2F6FED" />
             <KpiCard value={kpis.cannotAssess} label="Cannot Assess" color="#94A3B8" />
-            <KpiCard value={openIssues} label="Open Issues (Snag)" color="#DC2626" />
+            <KpiCard value={openIssues} label="Open Issues (Snag)" color="#DC2626"
+              onClick={() => navigate('/issues')} title="View all issues" />
           </div>
 
           {/* Activity completion + Summary */}
@@ -516,14 +519,31 @@ export default function DashboardNew() {
   )
 }
 
-function KpiCard({ value, label, color, big }) {
-  return (
-    <div className="card" style={{ padding: '14px 12px' }}>
+// `onClick` makes a card a drill-down (e.g. Open Issues → the Issues page).
+// Clickable cards render as a real <button> so keyboard and screen-reader
+// users get the same navigation a mouse click gives.
+function KpiCard({ value, label, color, big, onClick, title }) {
+  const body = (
+    <>
       <div style={{ fontSize: big ? 26 : 22, fontWeight: 700, fontFamily: 'Space Grotesk', color }}>
         {value}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{label}</div>
-    </div>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+        {label}{onClick && <span style={{ marginLeft: 4 }}>›</span>}
+      </div>
+    </>
+  )
+  if (!onClick) {
+    return <div className="card" style={{ padding: '14px 12px' }}>{body}</div>
+  }
+  return (
+    <button className="card" onClick={onClick} title={title}
+      style={{
+        padding: '14px 12px', cursor: 'pointer', textAlign: 'left',
+        font: 'inherit', width: '100%', display: 'block',
+      }}>
+      {body}
+    </button>
   )
 }
 
