@@ -82,6 +82,11 @@ def get_change_detection(room_id: str, db: Session = Depends(get_db)):
             "overall_pct": a.overall_pct,
             "delta": a.delta_pct,
             "flag": a.change_flag,
+            # The analysed/completed description *as written on that date* —
+            # without this the historical view has no note to show and
+            # collapses to just the pending list. Never substitute the latest
+            # note here: it would describe work that hadn't happened yet.
+            "ai_notes": a.ai_notes,
             # 🟢 Clean components here too for historical chart consistency
             "components": {
                 k: v for k, v in a.components.items()
