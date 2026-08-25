@@ -330,7 +330,6 @@ def uploads_status(ids: str, db: Session = Depends(get_db), user_id: str = Depen
 
 
 # ── Spots (offline-first create/delete) ────────────────────────────────────
-
 def _spot_out(spot: Spot):
     return {
         "SpotId": spot.id,

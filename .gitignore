@@ -8,6 +8,10 @@ __pycache__/
 # Environment files
 backend/.env
 
+
+./claude
+claude
+
 # Local dev database (SQLite)
 backend/*.db
 

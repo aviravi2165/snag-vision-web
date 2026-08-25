@@ -56,6 +56,7 @@ services:
     # cache on every start so a stale transform can never linger.
     environment:
       CHOKIDAR_USEPOLLING: "true"
+      BACKEND_URL: http://backend:8000
     command: npm run dev -- --host --force
     depends_on:
       - backend
