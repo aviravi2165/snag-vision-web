@@ -387,6 +387,10 @@ def recompute_unit_activity_progress(unit_id: str, db: Session) -> None:
         if not row:
             row = UnitActivityProgress(unit_id=unit_id, activity_id=activity_id)
             db.add(row)
+        # Only ever writes the AI columns. A manual override lives in
+        # manual_pct/is_overridden, so re-running analysis refreshes what the
+        # AI thinks without destroying a correction someone already made —
+        # readers resolve the two via UnitActivityProgress.effective_pct.
         row.progress_pct = data["pct"]
         row.confidence_score = data["confidence"]
         row.last_analysed = data["last_analysed"]
@@ -445,6 +449,80 @@ def unit_activity_matrix_as_of(
                 "last_analysed": data["last_analysed"],
             })
     return cells
+
+
+def apply_manual_overrides(
+    cells: List[dict], unit_ids: List[str], db: Session, as_of: date = None
+) -> List[dict]:
+    """Layer human corrections over AI-computed cells.
+
+    Each cell keeps the AI number in `ai_pct` and exposes the corrected one
+    as `pct`, so every existing consumer (KPI tiles, charts, the activity
+    table) picks up the correction without knowing overrides exist.
+
+    An override can also exist for a (Unit, Activity) the AI never scored —
+    that is precisely the "AI said Cannot Assess but the work is done" case —
+    so those are appended rather than only merged.
+
+    `as_of` rewinds the corrections too: a dashboard rewound to last Tuesday
+    must not show a correction someone made this morning, or the historical
+    view stops being historical. Overrides with no timestamp are treated as
+    always-applied, since they cannot be placed in time.
+    """
+    if not unit_ids:
+        return cells
+    rows = (
+        db.query(UnitActivityProgress)
+        .filter(
+            UnitActivityProgress.unit_id.in_(unit_ids),
+            UnitActivityProgress.is_overridden.is_(True),
+        )
+        .all()
+    )
+    if as_of is not None:
+        rows = [
+            r for r in rows
+            if r.overridden_at is None or r.overridden_at.date() <= as_of
+        ]
+    if not rows:
+        return cells
+
+    by_key = {(r.activity_id, r.unit_id): r for r in rows}
+    seen = set()
+    merged: List[dict] = []
+    for cell in cells:
+        key = (cell["activity_id"], cell["unit_id"])
+        row = by_key.get(key)
+        if row is None:
+            merged.append(cell)
+            continue
+        seen.add(key)
+        merged.append({**cell, **_override_fields(row, ai_pct=cell["pct"])})
+
+    # Corrections on cells the AI never produced a value for.
+    for key, row in by_key.items():
+        if key in seen:
+            continue
+        merged.append({
+            "activity_id": row.activity_id, "unit_id": row.unit_id,
+            "confidence": row.confidence_score, "last_analysed": row.last_analysed,
+            **_override_fields(row, ai_pct=row.progress_pct),
+        })
+    return merged
+
+
+def _override_fields(row: "UnitActivityProgress", ai_pct) -> dict:
+    """The override half of a matrix cell. `pct` is deliberately the
+    corrected value: callers should not have to know which of the two
+    numbers is authoritative."""
+    return {
+        "pct": row.manual_pct,
+        "ai_pct": ai_pct,
+        "is_override": True,
+        "override_note": row.manual_note,
+        "overridden_at": row.overridden_at,
+        "overridden_by": row.overridden_by,
+    }
 
 
 def _area_snapshots(

@@ -40,10 +40,10 @@ export default function Register() {
 
       {/* ── Left brand panel ── */}
       <div className="login-brand" style={{
-        flex: 1, background: '#16181D', color: '#FFFFFF',
+        flex: 1, background: '#181B2B', color: '#FFFFFF',
         padding: '56px 64px', display: 'flex', flexDirection: 'column',
         justifyContent: 'space-between', position: 'relative',
-        borderRight: '2px solid #D32F2F',
+        borderRight: '2px solid #DC3A3A',
       }}>
         <div>
           {/* Brand */}
@@ -52,41 +52,41 @@ export default function Register() {
             marginBottom: 4, color: '#FFFFFF' }}>
             VESTIGIA
           </div>
-          <div style={{ fontSize: 13, color: '#C9CDD4', fontStyle: 'italic', marginBottom: 8 }}>
+          <div style={{ fontSize: 13, color: '#D2D9EC', fontStyle: 'italic', marginBottom: 8 }}>
             The Verifiable Record of Execution.
           </div>
-          <div style={{ fontSize: 11, color: '#8A8F99', letterSpacing: '.05em', marginBottom: 40 }}>
+          <div style={{ fontSize: 11, color: '#6A7699', letterSpacing: '.05em', marginBottom: 40 }}>
             By I.EVO
           </div>
 
           {/* Feature list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {FEATURES.map(f => (
-              <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 14, color: '#E5E7EB' }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#D32F2F', flexShrink: 0 }} />
+              <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 14, color: '#E6EAF5' }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#DC3A3A', flexShrink: 0 }} />
                 {f}
               </div>
             ))}
           </div>
         </div>
 
-        <div style={{ fontSize: 11, color: '#5C616B', letterSpacing: '.05em' }}>
+        <div style={{ fontSize: 11, color: '#333F6A', letterSpacing: '.05em' }}>
           I.EVO — INTERIOR CONSTRUCTION MONITORING
         </div>
       </div>
 
       {/* ── Right form panel ── */}
       <div className="login-form-side" style={{
-        flex: 1, background: '#F8F7F4',
+        flex: 1, background: '#F4F6FC',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
       }}>
-        <div style={{ background: '#FFFFFF', border: '1px solid #E5E5E5',
+        <div style={{ background: '#FFFFFF', border: '1px solid #E6EAF5',
           borderRadius: 16, padding: '40px 36px', width: 400, maxWidth: '100%',
           boxShadow: '0 4px 24px rgba(0,0,0,0.07)' }}>
 
           <h2 style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: 26, fontWeight: 700,
-            color: '#111111', marginBottom: 4 }}>Create account</h2>
-          <p style={{ fontSize: 13, color: '#666666', marginBottom: 28 }}>
+            color: '#121C3D', marginBottom: 4 }}>Create account</h2>
+          <p style={{ fontSize: 13, color: '#6A7699', marginBottom: 28 }}>
             Get started with VESTIGIA
           </p>
 
@@ -117,9 +117,9 @@ export default function Register() {
             </button>
           </form>
 
-          <div style={{ marginTop: 20, textAlign: 'center', fontSize: 13, color: '#666666' }}>
+          <div style={{ marginTop: 20, textAlign: 'center', fontSize: 13, color: '#6A7699' }}>
             Already have an account?{' '}
-            <Link to="/login" style={{ color: '#D32F2F', fontWeight: 500 }}>Sign in</Link>
+            <Link to="/login" style={{ color: '#DC3A3A', fontWeight: 500 }}>Sign in</Link>
           </div>
         </div>
       </div>

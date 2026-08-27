@@ -21,13 +21,13 @@ const LightTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
   return (
     <div style={{
-      background: '#FFFFFF', border: '1px solid #E5E5E5',
+      background: '#FFFFFF', border: '1px solid #E6EAF5',
       borderRadius: 8, padding: '8px 14px',
       boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
       fontFamily: 'Inter, sans-serif',
     }}>
-      <div style={{ fontSize: 11, color: '#666666', marginBottom: 3 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: '#111111' }}>
+      <div style={{ fontSize: 11, color: '#6A7699', marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#121C3D' }}>
         {payload[0].value}%
       </div>
     </div>
@@ -68,13 +68,13 @@ function DashboardClassic() {
         alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
           <h1 style={{ fontSize: 22, marginBottom: 2 }}>{dashboard.project_name}</h1>
-          <p style={{ fontSize: 13, color: '#666666' }}>Executive overview</p>
+          <p style={{ fontSize: 13, color: '#6A7699' }}>Executive overview</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6,
-          background: '#E8F5E9', border: '1px solid #A5D6A7',
+          background: '#E7F7EF', border: '1px solid #B4E5CC',
           borderRadius: 20, padding: '5px 12px' }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#2E7D32' }} />
-          <span style={{ fontSize: 12, color: '#2E7D32', fontWeight: 500 }}>Live</span>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#12A05C' }} />
+          <span style={{ fontSize: 12, color: '#12A05C', fontWeight: 500 }}>Live</span>
         </div>
       </div>
 
@@ -84,7 +84,7 @@ function DashboardClassic() {
           sub="Across all floors" accent />
         <MetricCard label="Active delays" value={dashboard.active_delays || 0}
           sub="Rooms stalled or rework"
-          subColor={(dashboard.active_delays || 0) > 0 ? '#C62828' : '#2E7D32'} icon="⚠" />
+          subColor={(dashboard.active_delays || 0) > 0 ? '#DC3A3A' : '#12A05C'} icon="⚠" />
         <MetricCard label="Total floors" value={dashboard.floors?.length || 0}
           sub="Monitored" icon="⊟" />
         <MetricCard label="Est. completion" value={dashboard.est_completion || 'TBD'}
@@ -99,18 +99,18 @@ function DashboardClassic() {
           <SectionTitle>Weekly progress trend</SectionTitle>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={weeklyMock}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
-              <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#666666' }}
+              <CartesianGrid strokeDasharray="3 3" stroke="#EDEFF7" vertical={false} />
+              <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#6A7699' }}
                 axisLine={false} tickLine={false} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666666' }}
+              <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#6A7699' }}
                 axisLine={false} tickLine={false} />
               <Tooltip content={<LightTooltip />} />
               <Line
                 type="monotone" dataKey="pct"
-                stroke="#2F6FED" strokeWidth={2.5}
-                dot={{ r: 4, fill: '#2F6FED', stroke: '#FFFFFF', strokeWidth: 2 }}
+                stroke="#3D53E0" strokeWidth={2.5}
+                dot={{ r: 4, fill: '#3D53E0', stroke: '#FFFFFF', strokeWidth: 2 }}
                 connectNulls={false}
-                activeDot={{ r: 6, fill: '#2F6FED' }}
+                activeDot={{ r: 6, fill: '#3D53E0' }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -121,13 +121,13 @@ function DashboardClassic() {
           <SectionTitle>Floor-wise progress</SectionTitle>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={floorChart} barSize={28}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#666666' }}
+              <CartesianGrid strokeDasharray="3 3" stroke="#EDEFF7" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6A7699' }}
                 axisLine={false} tickLine={false} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666666' }}
+              <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#6A7699' }}
                 axisLine={false} tickLine={false} />
               <Tooltip content={<LightTooltip />} />
-              <Bar dataKey="pct" fill="#2F6FED" radius={[4, 4, 0, 0]} opacity={0.85} />
+              <Bar dataKey="pct" fill="#3D53E0" radius={[4, 4, 0, 0]} opacity={0.85} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -148,11 +148,11 @@ function DashboardClassic() {
             {dashboard.floors?.map(f => (
               <tr key={f.floor_id}>
                 <td style={{ fontWeight: 600 }}>Floor {f.floor_number}</td>
-                <td style={{ color: '#666666' }}>{f.units?.length || 0} units</td>
+                <td style={{ color: '#6A7699' }}>{f.units?.length || 0} units</td>
                 <td style={{ minWidth: 160 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <ProgressBar pct={f.pct} height={5} className="" />
-                    <span style={{ fontSize: 12, color: '#444444',
+                    <span style={{ fontSize: 12, color: '#333F6A',
                       fontWeight: 600, minWidth: 32 }}>
                       {Math.round(f.pct)}%
                     </span>
@@ -198,7 +198,7 @@ export default function Dashboard() {
           title="Toggle between classic and new Executive dashboard"
           style={{
             width: 38, height: 21, borderRadius: 11, cursor: 'pointer',
-            background: isNewDashboardEnabled ? 'var(--amber)' : 'var(--border, #D5D5D5)',
+            background: isNewDashboardEnabled ? 'var(--amber)' : 'var(--border, #D2D9EC)',
             position: 'relative', transition: 'background .2s', flexShrink: 0,
           }}
         >

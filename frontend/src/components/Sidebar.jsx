@@ -21,21 +21,21 @@ export default function Sidebar() {
   return (
     <aside style={{
       width: 212, flexShrink: 0,
-      background: 'var(--bg-surface)',
-      borderRight: '1px solid var(--border)',
+      background: 'var(--sidebar-bg)',
+      borderRight: '1px solid var(--sidebar-border)',
       display: 'flex', flexDirection: 'column',
       minHeight: '100vh', position: 'sticky', top: 0,
     }}>
       {/* Brand */}
       <div style={{
         padding: '18px 16px 14px',
-        borderBottom: '1px solid var(--border-dim)',
+        borderBottom: '1px solid var(--sidebar-border)',
       }}>
         <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700,
-          fontSize: 15, color: 'var(--text-1)', letterSpacing: '-0.03em' }}>
+          fontSize: 15, color: 'var(--sidebar-text-1)', letterSpacing: '-0.03em' }}>
           Vestigia
         </div>
-        <div style={{ fontSize: 10, color: '#999999', letterSpacing: '.05em' }}>
+        <div style={{ fontSize: 10, color: '#9AA3C0', letterSpacing: '.05em' }}>
           By I.EVO
         </div>
       </div>
@@ -43,7 +43,7 @@ export default function Sidebar() {
       {/* Project Switcher */}
       {projects?.length > 0 && (
         <div style={{ padding: '10px 12px 0' }}>
-          <div style={{ fontSize: 10, color: '#999999', letterSpacing: '.08em',
+          <div style={{ fontSize: 10, color: '#9AA3C0', letterSpacing: '.08em',
             textTransform: 'uppercase', marginBottom: 6, paddingLeft: 4 }}>
             Active project
           </div>
@@ -51,10 +51,10 @@ export default function Sidebar() {
             value={selectedProject?.id || ''}
             onChange={e => switchProject(e.target.value)}
             style={{
-              width: '100%', background: 'var(--bg-secondary)',
-              border: '1px solid var(--border)', borderRadius: 8,
+              width: '100%', background: 'var(--sidebar-bg-2)',
+              border: '1px solid var(--sidebar-border)', borderRadius: 8,
               padding: '7px 10px', fontSize: 12,
-              color: 'var(--text-1)', cursor: 'pointer',
+              color: 'var(--sidebar-text-1)', cursor: 'pointer',
             }}
           >
             {projects.map(p => (
@@ -66,7 +66,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav style={{ flex: 1, padding: '10px 10px', overflowY: 'auto' }}>
-        <div style={{ fontSize: 10, color: '#999999', letterSpacing: '.08em',
+        <div style={{ fontSize: 10, color: '#9AA3C0', letterSpacing: '.08em',
           textTransform: 'uppercase', padding: '8px 8px 4px', marginBottom: 2 }}>
           Monitor
         </div>
@@ -78,7 +78,7 @@ export default function Sidebar() {
           </NavLink>
         ))}
 
-        <div style={{ fontSize: 10, color: '#999999', letterSpacing: '.08em',
+        <div style={{ fontSize: 10, color: '#9AA3C0', letterSpacing: '.08em',
           textTransform: 'uppercase', padding: '12px 8px 4px', marginBottom: 2 }}>
           Manage
         </div>
@@ -92,9 +92,9 @@ export default function Sidebar() {
       </nav>
 
       {/* User */}
-      <div style={{ padding: '10px 10px 14px', borderTop: '1px solid var(--border-dim)' }}>
+      <div style={{ padding: '10px 10px 14px', borderTop: '1px solid var(--sidebar-border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10,
-          padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 8, marginBottom: 4 }}>
+          padding: '8px 10px', background: 'var(--sidebar-bg-2)', borderRadius: 8, marginBottom: 4 }}>
           <div style={{
             width: 28, height: 28, borderRadius: '50%',
             background: 'var(--accent-light)', border: '1.5px solid var(--accent-mid)',
@@ -105,22 +105,22 @@ export default function Sidebar() {
             {user?.name?.charAt(0) || 'U'}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)',
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--sidebar-text-1)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {user?.name}
             </div>
-            <div style={{ fontSize: 10, color: '#999999', textTransform: 'capitalize' }}>
+            <div style={{ fontSize: 10, color: '#9AA3C0', textTransform: 'capitalize' }}>
               {user?.role?.replace('_', ' ')}
             </div>
           </div>
         </div>
         <button onClick={logout} style={{
-          background: 'none', border: 'none', color: '#999999',
+          background: 'none', border: 'none', color: '#9AA3C0',
           fontSize: 12, cursor: 'pointer', padding: '3px 10px',
           width: '100%', textAlign: 'left', transition: 'color .15s',
         }}
-          onMouseOver={e => e.target.style.color = '#D32F2F'}
-          onMouseOut={e => e.target.style.color = '#999999'}
+          onMouseOver={e => e.target.style.color = '#DC3A3A'}
+          onMouseOut={e => e.target.style.color = '#9AA3C0'}
         >
           Sign out
         </button>

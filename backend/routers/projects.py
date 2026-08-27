@@ -3,20 +3,20 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Respons
 from sqlalchemy.orm import Session
 from models import get_db
 from models.database import (
-    Project, Floor, Unit, Room, Spot, UserRole,
+    Project, Floor, Unit, Room, Spot, UserRole, User,
     Activity, ActivityMapping, UnmappedComponent, UnitActivityProgress, ActivityExcelFile,
 )
 from schemas.models import (
     ProjectCreate, ProjectOut, FloorCreate, FloorOut,
     UnitCreate, RoomCreate, RoomOut, SpotCreate, SpotOut,
-    ActivityPlanIn, ActivityItem, UnitMapIn, ActivityMappingIn,
+    ActivityPlanIn, ActivityItem, UnitMapIn, ActivityMappingIn, ProgressOverrideIn,
 )
 from services.progress_service import build_dashboard
 from services.gcs_service import upload_media, download_media
 from services.excel_service import parse_activity_excel, match_unit_columns
 from services.mapping_service import (
     generate_ai_mapping, unit_activity_matrix_as_of, analysis_dates_for_project,
-    progress_series,
+    progress_series, apply_manual_overrides,
 )
 from services.activity_catalog import STANDARD_ACTIVITIES, refresh_standard_classification
 from routers.auth import get_current_user, require_role
@@ -351,7 +351,11 @@ def get_progress_matrix(project_id: str, as_of: str = None, db: Session = Depend
             unit_ids.append(u.id)
 
     if as_of_date:
+        # The replay knows nothing about manual corrections, so they are
+        # layered on afterwards - and rewound too, so a date-limited view
+        # never shows a correction that was made after that date.
         cells = unit_activity_matrix_as_of(project_id, unit_ids, as_of_date, db)
+        cells = apply_manual_overrides(cells, unit_ids, db, as_of=as_of_date)
     else:
         rows = (
             db.query(UnitActivityProgress).filter(UnitActivityProgress.unit_id.in_(unit_ids)).all()
@@ -360,7 +364,17 @@ def get_progress_matrix(project_id: str, as_of: str = None, db: Session = Depend
         cells = [
             {
                 "activity_id": r.activity_id, "unit_id": r.unit_id,
-                "pct": r.progress_pct, "confidence": r.confidence_score,
+                # `pct` is the effective value - corrected if a human
+                # corrected it - so KPIs, charts and the table all agree
+                # without each one re-deciding which number wins. `ai_pct`
+                # keeps the original reading visible for comparison.
+                "pct": r.effective_pct,
+                "ai_pct": r.progress_pct,
+                "is_override": bool(r.is_overridden),
+                "override_note": r.manual_note,
+                "overridden_at": r.overridden_at,
+                "overridden_by": r.overridden_by,
+                "confidence": r.confidence_score,
                 "last_analysed": r.last_analysed,
             }
             for r in rows
@@ -369,9 +383,138 @@ def get_progress_matrix(project_id: str, as_of: str = None, db: Session = Depend
     return {
         "activities": [_activity_out(a) for a in activities],
         "locations": locations,
-        "cells": cells,
+        "cells": _label_overriders(cells, db),
         "available_dates": analysis_dates_for_project(project_id, db),
         "as_of": as_of_date.isoformat() if as_of_date else None,
+    }
+
+
+def _label_overriders(cells: List[dict], db: Session) -> List[dict]:
+    """Swap the stored user id on overridden cells for a display name, in one
+    query for the whole matrix. `overridden_by` is a bare id column (no FK -
+    see UnitActivityProgress), so this cannot be a relationship load; a
+    since-deleted user degrades to "Unknown user" rather than breaking the
+    whole dashboard."""
+    ids = {c.get("overridden_by") for c in cells if c.get("is_override")}
+    ids.discard(None)
+    if not ids:
+        return cells
+    names = {
+        u.id: (u.name or u.email)
+        for u in db.query(User).filter(User.id.in_(ids)).all()
+    }
+    for c in cells:
+        if c.get("is_override"):
+            c["overridden_by_name"] = names.get(c.get("overridden_by"), "Unknown user")
+    return cells
+
+
+# -- Manual override of an AI-derived progress cell --------------------------
+# The AI is confidently wrong often enough that a dashboard nobody can correct
+# is a dashboard nobody trusts. These write only the manual_* columns, so the
+# next analysis run still refreshes the AI's own reading underneath.
+
+@router.put("/{project_id}/progress/override")
+def override_progress_cell(
+    project_id: str,
+    data: ProgressOverrideIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Record a human correction for one (Unit, Activity) cell.
+
+    `progress_pct: null` is a meaningful value here, not "clear the override":
+    it marks the cell Cannot Assess, which is the right correction when the AI
+    invented a number for a wall it never actually saw. Use DELETE to revert
+    to the AI's value."""
+    unit, activity = _validate_cell(project_id, data.unit_id, data.activity_id, db)
+
+    row = (
+        db.query(UnitActivityProgress)
+        .filter(
+            UnitActivityProgress.unit_id == unit.id,
+            UnitActivityProgress.activity_id == activity.id,
+        )
+        .first()
+    )
+    if not row:
+        # No AI reading for this cell yet - an override is still valid, and is
+        # exactly how "the AI couldn't assess it but I was standing there" gets
+        # fixed.
+        row = UnitActivityProgress(unit_id=unit.id, activity_id=activity.id)
+        db.add(row)
+
+    row.manual_pct = data.progress_pct
+    row.manual_note = (data.note or "").strip() or None
+    row.is_overridden = True
+    row.overridden_by = user.id
+    row.overridden_at = datetime.utcnow()
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return _override_out(row, user)
+
+
+@router.delete("/{project_id}/progress/override")
+def clear_progress_override(
+    project_id: str,
+    unit_id: str,
+    activity_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Drop the correction and fall back to the AI value. The AI columns were
+    never touched, so this needs no recompute - the underlying reading has been
+    kept up to date the whole time."""
+    unit, activity = _validate_cell(project_id, unit_id, activity_id, db)
+    row = (
+        db.query(UnitActivityProgress)
+        .filter(
+            UnitActivityProgress.unit_id == unit.id,
+            UnitActivityProgress.activity_id == activity.id,
+        )
+        .first()
+    )
+    if not row or not row.is_overridden:
+        raise HTTPException(404, "No manual override on this cell")
+
+    row.manual_pct = None
+    row.manual_note = None
+    row.is_overridden = False
+    row.overridden_by = None
+    row.overridden_at = None
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return _override_out(row, None)
+
+
+def _validate_cell(project_id: str, unit_id: str, activity_id: str, db: Session):
+    """Both ends must belong to THIS project - without this check a valid token
+    for one project could be used to write cells in another."""
+    activity = db.query(Activity).get(activity_id)
+    if not activity or activity.project_id != project_id:
+        raise HTTPException(404, "Activity not found in this project")
+    unit = db.query(Unit).get(unit_id)
+    if not unit or not unit.floor or unit.floor.project_id != project_id:
+        raise HTTPException(404, "Unit not found in this project")
+    return unit, activity
+
+
+def _override_out(row: UnitActivityProgress, user) -> dict:
+    """Same shape as a matrix cell, so the frontend can drop the response
+    straight into its `cells` state instead of refetching the whole matrix."""
+    return {
+        "activity_id": row.activity_id, "unit_id": row.unit_id,
+        "pct": row.effective_pct,
+        "ai_pct": row.progress_pct,
+        "is_override": bool(row.is_overridden),
+        "override_note": row.manual_note,
+        "overridden_at": row.overridden_at,
+        "overridden_by": row.overridden_by,
+        "overridden_by_name": (user.name or user.email) if user and row.is_overridden else None,
+        "confidence": row.confidence_score,
+        "last_analysed": row.last_analysed,
     }
 
 

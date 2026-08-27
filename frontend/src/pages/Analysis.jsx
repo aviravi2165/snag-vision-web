@@ -157,7 +157,7 @@ export default function AnalysisPage() {
                     {Math.round(analysis.overall_pct)}%
                   </div>
                   {analysis.delta_pct !== null && (
-                    <div style={{ fontSize: 12, marginTop: 4, color: analysis.delta_pct > 0 ? '#4ADE80' : '#F87171' }}>
+                    <div style={{ fontSize: 12, marginTop: 4, color: analysis.delta_pct > 0 ? '#3ECF86' : '#EE6A6A' }}>
                       {analysis.delta_pct > 0 ? '↑' : '↓'} {Math.abs(analysis.delta_pct)}% vs last visit
                     </div>
                   )}

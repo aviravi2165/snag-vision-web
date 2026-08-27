@@ -239,7 +239,10 @@ async def _sync_project_excel(project_id: str, db):
         .filter(UnitActivityProgress.unit_id.in_(unit_ids))
         .all()
     )
-    progress_by_activity_unit = {(r.activity_id, r.unit_id): r.progress_pct for r in rows}
+    # effective_pct, not progress_pct: a manual correction that shows on the
+    # dashboard but not in the exported Excel is worse than no correction at
+    # all, since the two then disagree with no way to tell which is current.
+    progress_by_activity_unit = {(r.activity_id, r.unit_id): r.effective_pct for r in rows}
 
     file_bytes = await download_media(excel_file.file_path)
     activity_col_index = parse_activity_excel(file_bytes).activity_col_index

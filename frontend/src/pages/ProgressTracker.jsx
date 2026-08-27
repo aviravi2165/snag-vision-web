@@ -16,9 +16,9 @@ const DOT_RADIUS = 10
 
 // ─── Colour scheme per hotspot status ────────────────────────────────────────
 const STATUS = {
-  planned:  { fill: '#F5C842', stroke: '#B8920A', label: '#000' },   // yellow
-  captured: { fill: '#22C55E', stroke: '#15803D', label: '#fff' },   // green
-  active:   { fill: '#6366F1', stroke: '#4338CA', label: '#fff' },   // indigo pulse
+  planned:  { fill: '#E8A317', stroke: '#B8790C', label: '#000' },   // yellow
+  captured: { fill: '#22B96B', stroke: '#12A05C', label: '#fff' },   // green
+  active:   { fill: '#6E7DEC', stroke: '#2F41C2', label: '#fff' },   // indigo pulse
 }
 
 // ─── Utility: file → base64 ────────────────────────────────────────────────
@@ -129,7 +129,7 @@ function SetupScreen({ onSetupComplete }) {
               <div style={{ position: 'relative' }}>
                 <img src={imgSrc} alt="floor plan preview"
                   style={{ width: '100%', maxHeight: 220, objectFit: 'contain',
-                    display: 'block', background: '#0a0c11' }} />
+                    display: 'block', background: '#111320' }} />
                 <div style={{ position: 'absolute', bottom: 8, right: 8,
                   background: 'rgba(0,0,0,0.7)', borderRadius: 6, padding: '4px 10px',
                   fontSize: 11, color: 'var(--amber)' }}>
@@ -390,14 +390,14 @@ function FloorPlanCanvas({ floorPlanUrl, hotspots, mode, activeHotspotId,
       ctx.lineWidth   = 1
       roundRect(ctx, bx, by, tw, th, 4); ctx.fill(); ctx.stroke()
 
-      ctx.fillStyle      = '#F1F5F9'
+      ctx.fillStyle      = '#F4F6FC'
       ctx.textAlign      = 'center'
       ctx.textBaseline   = 'middle'
       ctx.fillText(bubbleText, x, by + th / 2)
 
       // Captured check
       if (h.status === 'captured') {
-        ctx.fillStyle  = '#22C55E'
+        ctx.fillStyle  = '#22B96B'
         ctx.font       = 'bold 10px Inter, sans-serif'
         ctx.textAlign  = 'center'
         ctx.fillText('✓', x + DOT_RADIUS + 3, y - DOT_RADIUS)
@@ -477,7 +477,7 @@ function AIReport({ results, onReset }) {
       {/* Summary header */}
       <div className="card" style={{
         marginBottom: 16,
-        background: 'linear-gradient(135deg, var(--bg-card), #1a1608)',
+        background: 'linear-gradient(135deg, var(--bg-card), #181B2B)',
         borderColor: 'var(--amber-dim)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
       }}>
@@ -698,9 +698,9 @@ export default function ProgressTracker() {
 
         {/* Stats pills */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <StatPill label="Planned" value={totalPlanned}  color="#F5C842" />
-          <StatPill label="Captured" value={totalCaptured} color="#22C55E" />
-          <StatPill label="Remaining" value={totalPlanned - totalCaptured} color="#EF4444" />
+          <StatPill label="Planned" value={totalPlanned}  color="#E8A317" />
+          <StatPill label="Captured" value={totalCaptured} color="#22B96B" />
+          <StatPill label="Remaining" value={totalPlanned - totalCaptured} color="#E5484D" />
         </div>
       </div>
 
@@ -718,7 +718,7 @@ export default function ProgressTracker() {
             <button key={m.key} onClick={() => { setMode(m.key); setActiveHsId(null) }} style={{
               padding: '8px 16px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
               background: mode === m.key ? 'var(--amber)' : 'transparent',
-              color:      mode === m.key ? '#0D0F14'       : 'var(--text-3)',
+              color:      mode === m.key ? '#111320'       : 'var(--text-3)',
               transition: 'all .15s',
             }}>
               {m.icon} {m.label}
@@ -737,7 +737,7 @@ export default function ProgressTracker() {
         <button
           className="btn-primary"
           style={{ marginLeft: 'auto', opacity: canSubmit ? 1 : 0.35,
-            background: canSubmit ? '#22C55E' : undefined, fontSize: 13 }}
+            background: canSubmit ? '#22B96B' : undefined, fontSize: 13 }}
           disabled={!canSubmit}
           onClick={handleAISubmit}
         >
@@ -761,15 +761,15 @@ export default function ProgressTracker() {
           <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border-dim)',
             display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-3)' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#F5C842', display: 'inline-block' }} />
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#E8A317', display: 'inline-block' }} />
               Planned
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#22C55E', display: 'inline-block' }} />
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#22B96B', display: 'inline-block' }} />
               Captured
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#6366F1', display: 'inline-block' }} />
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#6E7DEC', display: 'inline-block' }} />
               Active
             </span>
           </div>
@@ -832,8 +832,8 @@ export default function ProgressTracker() {
                   >
                     {/* Status dot */}
                     <div style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-                      background: h.status === 'captured' ? '#22C55E' : '#F5C842',
-                      boxShadow: `0 0 6px ${h.status === 'captured' ? '#22C55E' : '#F5C842'}` }} />
+                      background: h.status === 'captured' ? '#22B96B' : '#E8A317',
+                      boxShadow: `0 0 6px ${h.status === 'captured' ? '#22B96B' : '#E8A317'}` }} />
 
                     {/* Label + timestamp */}
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -884,7 +884,7 @@ export default function ProgressTracker() {
                 }} />
               </div>
               {canSubmit && (
-                <div style={{ marginTop: 10, fontSize: 11, color: '#4ADE80', textAlign: 'center' }}>
+                <div style={{ marginTop: 10, fontSize: 11, color: '#3ECF86', textAlign: 'center' }}>
                   ✓ Ready to submit for AI analysis
                 </div>
               )}
@@ -938,9 +938,9 @@ function StatPill({ label, value, color }) {
 }
 
 function pctColor(pct) {
-  if (pct >= 80) return '#22C55E'
-  if (pct >= 50) return '#F5A623'
-  return '#EF4444'
+  if (pct >= 80) return '#22B96B'
+  if (pct >= 50) return '#E8A317'
+  return '#E5484D'
 }
 
 function roundRect(ctx, x, y, w, h, r) {

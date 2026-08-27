@@ -35,18 +35,21 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProject } from '../hooks/useProject'
-import { getProgressMatrix, getProgressSeries, getIssues } from '../utils/api'
+import {
+  getProgressMatrix, getProgressSeries, getIssues,
+  overrideProgress, clearProgressOverride,
+} from '../utils/api'
 import { Spinner, Empty } from '../components/UI'
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  ComposedChart, Area, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, LabelList,
 } from 'recharts'
 
 const COMPLETED_AT = 95   // >= this % counts as "Work Completed"
 
 // Bar fill + track as specified: light blue on a very light blue track.
-const BAR_FILL = '#60A5FA'
-const BAR_TRACK = '#EAF2FF'
+const BAR_FILL = '#6E7DEC'
+const BAR_TRACK = '#EDF0FD'
 
 function statusFor(val) {
   if (val === null || val === undefined) return 'Cannot Assess'
@@ -55,19 +58,34 @@ function statusFor(val) {
   return 'Not Started'
 }
 const STATUS_COLOR = {
-  'Work Completed': '#16856F',
-  'In Progress':     '#2F6FED',
-  'Not Started':     '#D96A32',
-  'Cannot Assess':   '#94A3B8',
+  'Work Completed': '#12A05C',
+  'In Progress':     '#3D53E0',
+  'Not Started':     '#B8790C',
+  'Cannot Assess':   '#9AA3C0',
 }
 
 const LightTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
   return (
-    <div style={{ background: '#FFFFFF', border: '1px solid #E5E5E5', borderRadius: 8,
+    <div style={{ background: '#FFFFFF', border: '1px solid #E6EAF5', borderRadius: 8,
       padding: '8px 14px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
-      <div style={{ fontSize: 11, color: '#666666', marginBottom: 3 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: '#111111' }}>{payload[0].value}%</div>
+      <div style={{ fontSize: 11, color: '#6A7699', marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#121C3D' }}>{payload[0].value}%</div>
+    </div>
+  )
+}
+
+// Trend-chart tooltip: dark navy pill with the date above the percentage.
+// Separate from LightTooltip on purpose — that one belongs to the bar chart
+// and is left untouched.
+const TrendTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{ background: '#121C3D', borderRadius: 10, padding: '7px 12px',
+      boxShadow: '0 6px 20px rgba(18,28,61,0.28)', textAlign: 'center' }}>
+      <div style={{ fontSize: 10, color: '#A6AECB', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: '#FFFFFF',
+        fontFamily: 'Space Grotesk' }}>{payload[0].value}%</div>
     </div>
   )
 }
@@ -169,6 +187,10 @@ export default function DashboardNew() {
   // work wasn't complete yet. Judged against `asOf` rather than today so a
   // rewound dashboard doesn't flag activities that still had time left then.
   const asOfOrToday = asOf || todayIso()
+  // A rewound view is one pinned to a date OLDER than the newest capture —
+  // picking the newest date from the dropdown still sets `asOf`, so testing
+  // `asOf` alone would wrongly treat the live view as historical.
+  const isPastView = Boolean(asOf) && Boolean(availableDates[0]) && asOf !== availableDates[0]
   const isDelayed = useCallback((name, pct) => {
     const target = targetDateFor(name)
     if (!target) return false
@@ -199,6 +221,29 @@ export default function DashboardNew() {
     if (!activityId) return null
     return cellMap.get(`${activityId}|${location.unit_id}`)?.pct ?? null
   }, [nameToId, cellMap])
+
+  // The whole cell, not just its number — the override editor needs to show
+  // what the AI originally read, who corrected it and why.
+  const cellFor = useCallback((location, activityName) => {
+    const activityId = nameToId.get(activityName)
+    if (!activityId) return null
+    return cellMap.get(`${activityId}|${location.unit_id}`) || null
+  }, [nameToId, cellMap])
+
+  // Splice one saved cell back into `cells`. Everything on this page derives
+  // from `cells` through useMemo, so the KPI tiles, the bar chart and the
+  // table all move the moment a correction lands — no refetch, and no risk of
+  // the table disagreeing with the tiles above it.
+  const applyCell = useCallback((updated) => {
+    setCells(prev => {
+      const i = prev.findIndex(c =>
+        c.activity_id === updated.activity_id && c.unit_id === updated.unit_id)
+      if (i === -1) return [...prev, updated]
+      const next = prev.slice()
+      next[i] = updated
+      return next
+    })
+  }, [])
 
   const locationLabel = (l) => `Floor ${l.floor_number} | ${l.unit_number}`
 
@@ -360,10 +405,10 @@ export default function DashboardNew() {
         </select>
 
         {/* Rewound views are easy to mistake for the live dashboard — say so. */}
-        {asOf && availableDates[0] && asOf !== availableDates[0] && (
+        {isPastView && (
           <span style={{
-            fontSize: 11, fontWeight: 600, color: '#92400E', background: '#FEF3C7',
-            border: '1px solid #FDE68A', borderRadius: 20, padding: '3px 10px',
+            fontSize: 11, fontWeight: 600, color: '#B8790C', background: '#FFF6E6',
+            border: '1px solid #F6DBA7', borderRadius: 20, padding: '3px 10px',
           }}>
             Showing progress as of {new Date(asOf + 'T00:00:00').toLocaleDateString()} — not the latest
           </span>
@@ -374,12 +419,12 @@ export default function DashboardNew() {
         <>
           {/* KPI row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
-            <KpiCard value={`${Math.round(kpis.overall)}%`} label="Overall Completion" color="#2F6FED" big />
-            <KpiCard value={kpis.totalActivities} label="Total Activities" color="#7C3AED" />
-            <KpiCard value={kpis.completed} label="Activities Completed" color="#16856F" />
-            <KpiCard value={kpis.inProgress} label="In Progress" color="#2F6FED" />
-            <KpiCard value={kpis.cannotAssess} label="Cannot Assess" color="#94A3B8" />
-            <KpiCard value={openIssues} label="Open Issues (Snag)" color="#DC2626"
+            <KpiCard value={`${Math.round(kpis.overall)}%`} label="Overall Completion" color="#3D53E0" big />
+            <KpiCard value={kpis.totalActivities} label="Total Activities" color="#7A6BE8" />
+            <KpiCard value={kpis.completed} label="Activities Completed" color="#12A05C" />
+            <KpiCard value={kpis.inProgress} label="In Progress" color="#3D53E0" />
+            <KpiCard value={kpis.cannotAssess} label="Cannot Assess" color="#9AA3C0" />
+            <KpiCard value={openIssues} label="Open Issues (Snag)" color="#DC3A3A"
               onClick={() => navigate('/issues')} title="View all issues" />
           </div>
 
@@ -401,7 +446,7 @@ export default function DashboardNew() {
                           </span>
                         )}
                         {a.delayed && (
-                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#DC2626' }}>⚠ DELAYED</span>
+                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#DC3A3A' }}>⚠ DELAYED</span>
                         )}
                       </span>
                       <span style={{ fontWeight: 600 }}>{a.hasData ? `${a.pct}%` : '—'}</span>
@@ -452,15 +497,15 @@ export default function DashboardNew() {
                   <div style={{ minWidth: Math.max(locationChart.length * 70, 100), height: 260 }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={locationChart}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
-                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#666' }} axisLine={false} tickLine={false}
+                        <CartesianGrid strokeDasharray="3 3" stroke="#EDEFF7" vertical={false} />
+                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#6A7699' }} axisLine={false} tickLine={false}
                           angle={-40} textAnchor="end" height={70} interval={0} />
-                        <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#6A7699' }} axisLine={false} tickLine={false} />
                         <Tooltip content={<LightTooltip />} />
                         <Bar dataKey="pct" fill={BAR_FILL} radius={[4, 4, 0, 0]} barSize={24}>
                           <LabelList dataKey="pct" position="top"
                             formatter={v => `${v}%`}
-                            style={{ fontSize: 10, fill: '#444', fontWeight: 600 }} />
+                            style={{ fontSize: 10, fill: '#333F6A', fontWeight: 600 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
@@ -485,19 +530,41 @@ export default function DashboardNew() {
                   <ResponsiveContainer width="100%" height="100%">
                     {/* One point per capture date — the x-axis is deliberately
                         categorical: nothing is interpolated between captures. */}
-                    <LineChart data={trendChart}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" vertical={false} />
-                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
-                      <Tooltip content={<LightTooltip />} />
+                    <ComposedChart data={trendChart}>
+                      <defs>
+                        {/* Light blue wash under the line, fading to nothing
+                            at the baseline so it never competes with the grid. */}
+                        <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%"   stopColor={BAR_FILL} stopOpacity={0.24} />
+                          <stop offset="100%" stopColor={BAR_FILL} stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#EDEFF7" vertical={false} />
+                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6A7699' }} axisLine={false} tickLine={false} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#6A7699' }} axisLine={false} tickLine={false} />
+                      <Tooltip content={<TrendTooltip />} cursor={{ stroke: '#C2CBF8', strokeWidth: 1 }} />
+                      {/* Fill and stroke are split across two series: Area
+                          paints only the wash, Line carries the stroke and the
+                          points. isAnimationActive is off on both because
+                          recharts 2.15 gates dot rendering behind an
+                          animation-finished flag that never flips for this
+                          chart — which is why the points were invisible here
+                          before. The chart now renders complete on first paint. */}
+                      <Area
+                        type="monotone" dataKey="pct"
+                        stroke="none" fill="url(#trendFill)"
+                        connectNulls={false}
+                        isAnimationActive={false}
+                      />
                       <Line
                         type="monotone" dataKey="pct"
                         stroke={BAR_FILL} strokeWidth={2.5}
-                        dot={{ r: 4, fill: BAR_FILL, stroke: '#FFFFFF', strokeWidth: 2 }}
+                        dot={{ r: 4, fill: '#FFFFFF', stroke: BAR_FILL, strokeWidth: 2.5 }}
                         connectNulls={false}
-                        activeDot={{ r: 6, fill: BAR_FILL }}
+                        activeDot={{ r: 6, fill: '#FFFFFF', stroke: BAR_FILL, strokeWidth: 3 }}
+                        isAnimationActive={false}
                       />
-                    </LineChart>
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               )}
@@ -510,8 +577,14 @@ export default function DashboardNew() {
       {showActivityModal && (
         <ActivityDetailsModal
           activityNames={activityNames} locations={filteredLocations}
-          cellValue={cellValue} locationLabel={locationLabel}
+          cellValue={cellValue} cellFor={cellFor} locationLabel={locationLabel}
           targetDateFor={targetDateFor} isDelayed={isDelayed}
+          projectId={selectedProject?.id} nameToId={nameToId}
+          onCellSaved={applyCell}
+          /* A correction always applies to the cell as it stands today.
+             Editing while rewound would write a "now" value from a view of
+             the past, so the editor is read-only until you return to latest. */
+          readOnly={isPastView}
           onClose={() => setShowActivityModal(false)}
         />
       )}
@@ -523,6 +596,14 @@ export default function DashboardNew() {
 // Clickable cards render as a real <button> so keyboard and screen-reader
 // users get the same navigation a mouse click gives.
 function KpiCard({ value, label, color, big, onClick, title }) {
+  // The card's own KPI colour, drawn as a 3px band across the top edge.
+  // backgroundColor is left to `.card`, so only the band is added here.
+  const accentStrip = {
+    backgroundImage: `linear-gradient(${color}, ${color})`,
+    backgroundSize: '100% 3px',
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'top left',
+  }
   const body = (
     <>
       <div style={{ fontSize: big ? 26 : 22, fontWeight: 700, fontFamily: 'Space Grotesk', color }}>
@@ -534,13 +615,14 @@ function KpiCard({ value, label, color, big, onClick, title }) {
     </>
   )
   if (!onClick) {
-    return <div className="card" style={{ padding: '14px 12px' }}>{body}</div>
+    return <div className="card" style={{ padding: '14px 12px', ...accentStrip }}>{body}</div>
   }
   return (
     <button className="card" onClick={onClick} title={title}
       style={{
         padding: '14px 12px', cursor: 'pointer', textAlign: 'left',
         font: 'inherit', width: '100%', display: 'block',
+        ...accentStrip,
       }}>
       {body}
     </button>
@@ -554,7 +636,7 @@ function ModalShell({ title, onClose, width = 900, children }) {
       <div style={{ background: '#fff', borderRadius: 14, width, maxWidth: '95vw', maxHeight: '85vh',
         display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 12px 40px rgba(0,0,0,0.2)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '14px 20px', borderBottom: '1px solid #E5E5E5' }}>
+          padding: '14px 20px', borderBottom: '1px solid #E6EAF5' }}>
           <span style={{ fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 15 }}>{title}</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20 }}>✕</button>
         </div>
@@ -564,9 +646,16 @@ function ModalShell({ title, onClose, width = 900, children }) {
   )
 }
 
-function ActivityDetailsModal({ activityNames, locations, cellValue, locationLabel, targetDateFor, isDelayed, onClose }) {
+function ActivityDetailsModal({
+  activityNames, locations, cellValue, cellFor, locationLabel,
+  targetDateFor, isDelayed, projectId, nameToId, onCellSaved, readOnly, onClose,
+}) {
   const [filter, setFilter] = useState('All')
   const [search, setSearch] = useState('')
+  // The cell currently being corrected: { activityName, activityId, location }.
+  // One at a time — a grid of simultaneously-open editors is unreadable, and
+  // makes it far too easy to save a number into the wrong column.
+  const [editing, setEditing] = useState(null)
 
   const rows = activityNames
     .filter(a => a.toLowerCase().includes(search.toLowerCase()))
@@ -586,14 +675,21 @@ function ActivityDetailsModal({ activityNames, locations, cellValue, locationLab
           {['All', 'Work Completed', 'In Progress', 'Not Started', 'Cannot Assess'].map(f => (
             <button key={f} onClick={() => setFilter(f)} style={{
               padding: '5px 10px', borderRadius: 20, fontSize: 11, cursor: 'pointer',
-              border: `1px solid ${filter === f ? '#111' : '#E5E5E5'}`,
-              background: filter === f ? '#111' : '#fff', color: filter === f ? '#fff' : '#666',
+              border: `1px solid ${filter === f ? '#121C3D' : '#E6EAF5'}`,
+              background: filter === f ? '#121C3D' : '#fff', color: filter === f ? '#fff' : '#6A7699',
             }}>{f}</button>
           ))}
         </div>
         <input placeholder="Search activity…" value={search} onChange={e => setSearch(e.target.value)}
           style={{ width: 200 }} />
       </div>
+
+      <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10 }}>
+        {readOnly
+          ? '⚠ You are viewing a past date. Switch back to the latest date to correct a value.'
+          : 'Click any percentage to correct it. Corrected values are marked ✏ and keep the AI’s original reading for reference.'}
+      </div>
+
       <div style={{ overflowX: 'auto' }}>
         <table className="data-table">
           <thead>
@@ -615,23 +711,23 @@ function ActivityDetailsModal({ activityNames, locations, cellValue, locationLab
                 <tr key={a}>
                   <td style={{ fontWeight: 600 }}>
                     {a}
-                    {delayed && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#DC2626' }}>⚠ DELAYED</span>}
+                    {delayed && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#DC3A3A' }}>⚠ DELAYED</span>}
                   </td>
-                  <td style={{ fontSize: 12, color: delayed ? '#DC2626' : 'var(--text-3)', fontWeight: delayed ? 700 : 400 }}>
+                  <td style={{ fontSize: 12, color: delayed ? '#DC3A3A' : 'var(--text-3)', fontWeight: delayed ? 700 : 400 }}>
                     {target ? new Date(target + 'T00:00:00').toLocaleDateString() : '—'}
                   </td>
-                  {locations.map(l => {
-                    const v = cellValue(l, a)
-                    const status = statusFor(v)
-                    return (
-                      <td key={l.unit_id}>
-                        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-                          background: STATUS_COLOR[status] + '22', color: STATUS_COLOR[status] }}>
-                          {v === null ? 'N/A' : `${Math.round(v)}%`}
-                        </span>
-                      </td>
-                    )
-                  })}
+                  {locations.map(l => (
+                    <td key={l.unit_id}>
+                      <ProgressCell
+                        cell={cellFor(l, a)}
+                        value={cellValue(l, a)}
+                        readOnly={readOnly}
+                        onEdit={() => setEditing({
+                          activityName: a, activityId: nameToId.get(a), location: l,
+                        })}
+                      />
+                    </td>
+                  ))}
                 </tr>
               )
             })}
@@ -643,6 +739,186 @@ function ActivityDetailsModal({ activityNames, locations, cellValue, locationLab
           </tbody>
         </table>
       </div>
+
+      {editing && (
+        <OverrideEditor
+          projectId={projectId}
+          activityName={editing.activityName}
+          activityId={editing.activityId}
+          location={editing.location}
+          locationLabel={locationLabel}
+          cell={cellFor(editing.location, editing.activityName)}
+          onSaved={(updated) => { onCellSaved(updated); setEditing(null) }}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </ModalShell>
+  )
+}
+
+// One matrix cell. A corrected value is deliberately loud — solid border, ✏,
+// and the AI's original number in the tooltip — because a silently-edited
+// dashboard is a dashboard whose numbers can no longer be traced back to
+// anything.
+function ProgressCell({ cell, value, readOnly, onEdit }) {
+  const status = statusFor(value)
+  const color = STATUS_COLOR[status]
+  const isOverride = Boolean(cell?.is_override)
+  const text = value === null || value === undefined ? 'N/A' : `${Math.round(value)}%`
+
+  const aiText = cell?.ai_pct === null || cell?.ai_pct === undefined
+    ? 'Cannot Assess' : `${Math.round(cell.ai_pct)}%`
+  const title = isOverride
+    ? [
+        `Manually corrected to ${text}`,
+        `AI reading: ${aiText}`,
+        cell.overridden_by_name ? `By: ${cell.overridden_by_name}` : null,
+        cell.overridden_at ? `On: ${new Date(cell.overridden_at).toLocaleString()}` : null,
+        cell.override_note ? `Note: ${cell.override_note}` : null,
+      ].filter(Boolean).join('\n')
+    : readOnly ? 'Switch to the latest date to correct this value' : 'Click to correct this value'
+
+  const pill = (
+    <span style={{
+      fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+      background: color + '22', color,
+      border: isOverride ? `1px solid ${color}` : '1px solid transparent',
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+    }}>
+      {text}{isOverride && <span style={{ fontSize: 9 }} aria-hidden="true">✏</span>}
+    </span>
+  )
+
+  if (readOnly) {
+    return <span title={title}>{pill}{isOverride && <span className="sr-only"> (manually corrected)</span>}</span>
+  }
+  return (
+    <button onClick={onEdit} title={title}
+      aria-label={`${text}${isOverride ? ' (manually corrected)' : ''} — click to correct`}
+      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}>
+      {pill}
+    </button>
+  )
+}
+
+// Correction dialog. Rendered as its own fixed-position layer rather than a
+// popover inside the table: the table scrolls horizontally under
+// `overflow-x: auto`, which would clip anything anchored to a cell.
+function OverrideEditor({
+  projectId, activityName, activityId, location, locationLabel, cell, onSaved, onClose,
+}) {
+  const isOverride = Boolean(cell?.is_override)
+  const current = cell?.pct
+  const [cannotAssess, setCannotAssess] = useState(current === null || current === undefined)
+  const [pct, setPct] = useState(
+    current === null || current === undefined ? '' : String(Math.round(current)))
+  const [note, setNote] = useState(cell?.override_note || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  const aiText = cell?.ai_pct === null || cell?.ai_pct === undefined
+    ? 'Cannot Assess' : `${Math.round(cell.ai_pct)}%`
+
+  const parsed = cannotAssess ? null : Number(pct)
+  const invalid = !cannotAssess && (pct.trim() === '' || Number.isNaN(parsed) || parsed < 0 || parsed > 100)
+
+  async function save() {
+    if (invalid) return
+    setBusy(true); setError(null)
+    try {
+      const { data } = await overrideProgress(projectId, {
+        unitId: location.unit_id, activityId, pct: parsed, note,
+      })
+      onSaved(data)
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Could not save. Please try again.')
+      setBusy(false)
+    }
+  }
+
+  async function reset() {
+    setBusy(true); setError(null)
+    try {
+      const { data } = await clearProgressOverride(projectId, {
+        unitId: location.unit_id, activityId,
+      })
+      onSaved(data)
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Could not reset. Please try again.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1100,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: '#fff', borderRadius: 12, width: 380, maxWidth: '95vw',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.25)', padding: 18 }}>
+        <div style={{ fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+          Correct progress
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 14 }}>
+          {activityName} · {locationLabel(location)}
+        </div>
+
+        <div style={{ fontSize: 11, color: 'var(--text-3)', background: '#F9FAFE',
+          borderRadius: 8, padding: '7px 10px', marginBottom: 14 }}>
+          AI reading: <strong style={{ color: '#121C3D' }}>{aiText}</strong>
+          {isOverride && <> · currently corrected to <strong style={{ color: '#121C3D' }}>
+            {current === null || current === undefined ? 'Cannot Assess' : `${Math.round(current)}%`}
+          </strong></>}
+        </div>
+
+        <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>
+          Progress %
+        </label>
+        <input type="number" min={0} max={100} value={pct} disabled={cannotAssess || busy}
+          onChange={e => setPct(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !invalid) save() }}
+          autoFocus style={{ width: '100%', marginBottom: 8 }} />
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 12 }}>
+          <input type="checkbox" checked={cannotAssess} disabled={busy}
+            onChange={e => setCannotAssess(e.target.checked)} />
+          Cannot Assess (no measurable value)
+        </label>
+
+        <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>
+          Reason (optional)
+        </label>
+        <input value={note} disabled={busy} maxLength={500}
+          onChange={e => setNote(e.target.value)}
+          placeholder="e.g. verified on site 26 Aug"
+          style={{ width: '100%', marginBottom: 14 }} />
+
+        {error && (
+          <div style={{ fontSize: 11, color: '#DC3A3A', marginBottom: 10 }}>{error}</div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+          {isOverride && (
+            <button onClick={reset} disabled={busy}
+              title="Discard the correction and go back to the AI's value"
+              style={{ marginRight: 'auto', background: 'none', border: 'none', fontSize: 11,
+                color: '#DC3A3A', cursor: busy ? 'default' : 'pointer', padding: 0 }}>
+              Reset to AI value
+            </button>
+          )}
+          <button onClick={onClose} disabled={busy} style={{
+            padding: '6px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
+            border: '1px solid #E6EAF5', background: '#fff', color: '#6A7699' }}>
+            Cancel
+          </button>
+          <button onClick={save} disabled={busy || invalid} style={{
+            padding: '6px 14px', borderRadius: 8, fontSize: 12,
+            cursor: busy || invalid ? 'default' : 'pointer', border: 'none',
+            background: busy || invalid ? '#9AA3C0' : '#121C3D', color: '#fff' }}>
+            {busy ? 'Saving…' : 'Save correction'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }

@@ -15,12 +15,12 @@ import { useState } from 'react'
 import toast from 'react-hot-toast'
 
 const STATUS_META = {
-  draft:             { label: 'Draft',             color: '#94A3B8' },
-  capturing:         { label: 'Capturing',         color: '#F5C842' },
-  ready_to_complete: { label: 'Ready to complete', color: '#6366F1' },
-  completed:         { label: 'Completed',         color: '#22C55E' },
-  ai_processing:     { label: 'AI analysing…',     color: '#F5C842' },
-  ai_completed:      { label: 'AI complete',       color: '#22C55E' },
+  draft:             { label: 'Draft',             color: '#9AA3C0' },
+  capturing:         { label: 'Capturing',         color: '#E8A317' },
+  ready_to_complete: { label: 'Ready to complete', color: '#6E7DEC' },
+  completed:         { label: 'Completed',         color: '#22B96B' },
+  ai_processing:     { label: 'AI analysing…',     color: '#E8A317' },
+  ai_completed:      { label: 'AI complete',       color: '#22B96B' },
 }
 
 export default function WalkthroughBar({
@@ -118,7 +118,7 @@ export default function WalkthroughBar({
                   background: viewing?.id === w.id ? 'var(--amber-glow)' : 'var(--bg-hover)',
                 }}
               >
-                <span style={{ color: '#22C55E', fontSize: 10 }}>✔</span>
+                <span style={{ color: '#22B96B', fontSize: 10 }}>✔</span>
                 Walkthrough {w.number}
                 {w.status === 'ai_completed' && (
                   <span style={{ fontSize: 10, color: 'var(--text-3)' }}>AI done</span>

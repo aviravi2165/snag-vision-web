@@ -240,9 +240,9 @@ export default function SiteCapture() {
 
         {/* Progress pills */}
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <ProgressPill value={capturedCount} label="Captured"  color="#22C55E" />
-          <ProgressPill value={totalPoints - capturedCount} label="Remaining" color="#F5C842" />
-          <ProgressPill value={pct + '%'} label="Complete" color="#6366F1" />
+          <ProgressPill value={capturedCount} label="Captured"  color="#22B96B" />
+          <ProgressPill value={totalPoints - capturedCount} label="Remaining" color="#E8A317" />
+          <ProgressPill value={pct + '%'} label="Complete" color="#6E7DEC" />
         </div>
       </div>
 
@@ -266,14 +266,14 @@ export default function SiteCapture() {
       <div style={{ marginBottom: 20 }}>
         <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${pct}%`,
-            background: pct === 100 ? '#22C55E' : 'var(--amber)',
+            background: pct === 100 ? '#22B96B' : 'var(--amber)',
             borderRadius: 3, transition: 'width .5s ease-out' }} />
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5 }}>
           <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
             {capturedCount} of {totalPoints} points captured
           </span>
-          <span style={{ fontSize: 11, color: pct === 100 ? '#4ADE80' : 'var(--text-3)' }}>
+          <span style={{ fontSize: 11, color: pct === 100 ? '#3ECF86' : 'var(--text-3)' }}>
             {pct === 100 ? '✓ All points complete' : `${pct}% complete`}
           </span>
         </div>
@@ -305,9 +305,9 @@ export default function SiteCapture() {
               </select>
             </div>
             <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-3)' }}>
-              <LegendItem color="#F5C842" label="Pending" />
-              <LegendItem color="#22C55E" label="Captured" />
-              <LegendItem color="#6366F1" label="Selected" />
+              <LegendItem color="#E8A317" label="Pending" />
+              <LegendItem color="#22B96B" label="Captured" />
+              <LegendItem color="#6E7DEC" label="Selected" />
             </div>
           </div>
 
@@ -318,7 +318,7 @@ export default function SiteCapture() {
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
-            style={{ position: 'relative', overflow: 'hidden', background: '#0a0c11',
+            style={{ position: 'relative', overflow: 'hidden', background: '#111320',
               userSelect: 'none', cursor: floorPlanUrl ? (isPanning.current ? 'grabbing' : 'grab') : 'default' }}
           >
             {!floorPlanUrl ? (
@@ -413,7 +413,7 @@ export default function SiteCapture() {
               {/* Current capture status */}
               {displayImages[activeHotspot.id] ? (
                 <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#4ADE80', marginBottom: 8,
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#3ECF86', marginBottom: 8,
                     display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span>✓</span> {viewing ? 'Captured (read-only view)' : '360° image captured'}
                   </div>
@@ -426,7 +426,7 @@ export default function SiteCapture() {
                       <div style={{ position: 'absolute', top: 6, right: 6 }}>
                         <button onClick={handleRemoveCapture} style={{ background: 'rgba(0,0,0,0.7)',
                           border: 'none', borderRadius: 6, padding: '4px 8px',
-                          color: '#F87171', cursor: 'pointer', fontSize: 11 }}>
+                          color: '#EE6A6A', cursor: 'pointer', fontSize: 11 }}>
                           🗑 Remove
                         </button>
                       </div>
@@ -493,7 +493,7 @@ export default function SiteCapture() {
                   onClick={handleCapture}
                   disabled={submitting}
                   style={{ width: '100%', padding: '11px', fontSize: 13,
-                    background: '#22C55E', opacity: submitting ? 0.6 : 1 }}
+                    background: '#22B96B', opacity: submitting ? 0.6 : 1 }}
                 >
                   {submitting ? '⏳ Saving…' : '✓ Confirm & Save'}
                 </button>
@@ -553,13 +553,13 @@ export default function SiteCapture() {
                       transition: 'all .15s',
                     }}>
                       <div style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
-                        background: isActive ? '#6366F1' : isCaptured ? '#22C55E' : '#F5C842',
-                        boxShadow: `0 0 5px ${isActive ? '#6366F1' : isCaptured ? '#22C55E' : '#F5C842'}` }} />
+                        background: isActive ? '#6E7DEC' : isCaptured ? '#22B96B' : '#E8A317',
+                        boxShadow: `0 0 5px ${isActive ? '#6E7DEC' : isCaptured ? '#22B96B' : '#E8A317'}` }} />
                       <span style={{ fontSize: 12, flex: 1, color: isActive ? 'var(--amber)' : 'var(--text-2)' }}>
                         Point {i + 1}
                       </span>
                       {isCaptured && (
-                        <span style={{ fontSize: 10, color: '#4ADE80', fontWeight: 600 }}>✓</span>
+                        <span style={{ fontSize: 10, color: '#3ECF86', fontWeight: 600 }}>✓</span>
                       )}
                     </div>
                   )
