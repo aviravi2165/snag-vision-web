@@ -351,8 +351,43 @@ class UnitActivityProgress(Base):
     confidence_score = Column(Float, nullable=True)
     last_analysed = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # ── Manual override ──────────────────────────────────────────────────
+    # A human's correction of the AI-derived value, kept in its OWN columns
+    # rather than overwriting progress_pct. That separation is the whole
+    # point: recompute_unit_activity_progress() keeps refreshing
+    # progress_pct from every new capture, so writing the correction there
+    # would have it silently wiped by the next analysis run. It also lets
+    # the UI show both numbers ("AI read 40%, corrected to 75%").
+    #
+    # Test `is_overridden`, never `manual_pct is not None` — overriding a
+    # hallucinated number back to "Cannot Assess" (manual_pct = None) is a
+    # legitimate correction, and the two cases are not distinguishable
+    # from the value alone.
+    manual_pct = Column(Float, nullable=True)
+    manual_note = Column(String(500), nullable=True)
+    # Nullable rather than NOT NULL DEFAULT false: _migrate_add_missing_columns()
+    # (models/__init__.py) can only add NULL-able columns to a populated
+    # table, so pre-existing rows carry NULL here. NULL reads as "not
+    # overridden", which is why effective_pct coerces with bool().
+    is_overridden = Column(Boolean, default=False, nullable=True)
+    # Deliberately NOT a ForeignKey to users.id: this column post-dates the
+    # table on already-deployed databases, and the self-healing migration
+    # adds plain columns without constraints (see models/__init__.py). The
+    # display name is resolved with a lookup at read time instead.
+    overridden_by = Column(String(36), nullable=True)
+    overridden_at = Column(DateTime, nullable=True)
+
     unit = relationship("Unit")
     activity = relationship("Activity", back_populates="unit_progress")
+
+    @property
+    def effective_pct(self):
+        """The value every consumer should read — dashboard cells, KPIs,
+        charts and the Excel sync alike: the human's correction when one
+        exists, otherwise the AI's. Keeping this in one place is what stops
+        an override from showing on screen but not in the exported Excel."""
+        return self.manual_pct if self.is_overridden else self.progress_pct
 
 
 class ActivityExcelFile(Base):

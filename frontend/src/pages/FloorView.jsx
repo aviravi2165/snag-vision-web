@@ -9,11 +9,11 @@ import { STANDARD_ACTIVITIES } from '../utils/standardActivities'
 const NEW_FLOORVIEW_KEY = 'vestigia_new_floorview_enabled'
 
 function heatStyle(pct) {
-  if (pct >= 95) return { bg: '#EAF7F2', border: '#BCE7DC', text: '#16856F' }
-  if (pct >= 80) return { bg: '#EAF7F8', border: '#BCE4E8', text: '#2D879B' }
-  if (pct >= 60) return { bg: '#F2EDFF', border: '#D7C8FF', text: '#7655C8' }
-  if (pct >= 40) return { bg: '#EAF2FF', border: '#BFD5FF', text: '#2F6FED' }
-  return { bg: '#FFF0EA', border: '#F6C6AF', text: '#D96A32' }
+  if (pct >= 95) return { bg: '#E7F7EF', border: '#B4E5CC', text: '#12A05C' }
+  if (pct >= 80) return { bg: '#EDF0FD', border: '#C2CBF8', text: '#3D53E0' }
+  if (pct >= 60) return { bg: '#F0EEFD', border: '#D3CDF8', text: '#7A6BE8' }
+  if (pct >= 40) return { bg: '#EDF0FD', border: '#C2CBF8', text: '#3D53E0' }
+  return { bg: '#FDECEC', border: '#F6C2C2', text: '#B8790C' }
 }
 
 function FloorViewClassic() {
@@ -169,9 +169,9 @@ function FloorViewClassic() {
                   {/* Legend */}
                   <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                     {[
-                      ['#16856F', '≥95% Complete'],
-                      ['#2F6FED', '50–94% In progress'],
-                      ['#D96A32', '<50% Delayed'],
+                      ['#12A05C', '≥95% Complete'],
+                      ['#3D53E0', '50–94% In progress'],
+                      ['#B8790C', '<50% Delayed'],
                     ].map(([c, t]) => (
                       <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-3)' }}>
                         <div style={{ width: 10, height: 10, borderRadius: 3, background: c + '33', border: `1px solid ${c}66` }} />
@@ -270,7 +270,7 @@ export default function FloorView() {
           title="Toggle between classic and new Floor View layout"
           style={{
             width: 38, height: 21, borderRadius: 11, cursor: 'pointer',
-            background: isNewFloorViewEnabled ? 'var(--amber)' : 'var(--border, #D5D5D5)',
+            background: isNewFloorViewEnabled ? 'var(--amber)' : 'var(--border, #D2D9EC)',
             position: 'relative', transition: 'background .2s', flexShrink: 0,
           }}
         >

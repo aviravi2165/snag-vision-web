@@ -343,14 +343,14 @@ export function Panorama360({
   return (
     <div ref={mountRef} style={{
       width: '100%', height: '100%', minHeight: height, borderRadius: 10, overflow: 'hidden',
-      background: '#0d0f14',
+      background: '#111320',
       cursor: placementMode ? 'crosshair' : src ? 'grab' : 'default',
       position: 'relative',
     }}>
       {loadError && (
         <div style={{
           position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
-          justifyContent: 'center', color: 'var(--red, #e05252)', fontSize: 12, textAlign: 'center', padding: 16,
+          justifyContent: 'center', color: 'var(--red, #DC3A3A)', fontSize: 12, textAlign: 'center', padding: 16,
         }}>
           Couldn't load this image ({src})
         </div>

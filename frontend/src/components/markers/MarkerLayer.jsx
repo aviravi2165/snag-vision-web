@@ -16,17 +16,17 @@
 // Pin colour by issue status, falling back to marker type for non-issue pins.
 // Matches the app's existing status palette (see components/UI.jsx StatusBadge).
 const STATUS_COLOR = {
-  open: '#C62828',
-  in_progress: '#E65100',
-  resolved: '#2E7D32',
-  closed: '#666666',
+  open: '#DC3A3A',
+  in_progress: '#B8790C',
+  resolved: '#12A05C',
+  closed: '#6A7699',
 }
 const TYPE_COLOR = {
-  issue: '#C62828',
-  ai_defect: '#7C3AED',
-  checkpoint: '#2563EB',
-  qa: '#0891B2',
-  safety: '#E65100',
+  issue: '#DC3A3A',
+  ai_defect: '#7A6BE8',
+  checkpoint: '#2F41C2',
+  qa: '#3D53E0',
+  safety: '#B8790C',
 }
 
 export function markerColor(marker) {
@@ -98,7 +98,7 @@ export default function MarkerLayer({
           transform: 'translate(-50%, -100%)', transformOrigin: 'bottom center',
           pointerEvents: 'none', zIndex: 4,
         }}>
-          <Pin color="#2563EB" pulse />
+          <Pin color="#2F41C2" pulse />
         </div>
       )}
     </div>

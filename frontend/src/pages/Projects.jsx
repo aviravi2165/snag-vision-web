@@ -310,7 +310,7 @@ export default function Projects() {
                   display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span>✓ {activities.length} {activities.length === 1 ? 'activity' : 'activities'} loaded — click to review</span>
                   <button onClick={(e) => { e.preventDefault(); setActivitiesState([]) }} style={{
-                    background: 'none', border: 'none', cursor: 'pointer', color: '#C62828',
+                    background: 'none', border: 'none', cursor: 'pointer', color: '#DC3A3A',
                     fontSize: 11, textDecoration: 'underline', padding: 0,
                   }}>Remove all</button>
                 </summary>

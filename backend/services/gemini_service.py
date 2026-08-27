@@ -161,7 +161,20 @@ async def analyse_image(image_b64, *args, activity_names: Optional[List[str]] = 
                 print("---------- GEMINI RESPONSE ----------")
                 print(response.text)
                 print("-------------------------------------")
-                
+
+                usage = getattr(response, "usage_metadata", None)
+                if usage:
+                    prompt_tokens = getattr(usage, "prompt_token_count", None)
+                    output_tokens = getattr(usage, "candidates_token_count", None)
+                    total_tokens = getattr(usage, "total_token_count", None)
+                    print("---------- GEMINI USAGE ----------")
+                    print(f"prompt_token_count (input): {prompt_tokens}")
+                    print(f"candidates_token_count (output): {output_tokens}")
+                    print(f"total_token_count: {total_tokens}")
+                    print("-----------------------------------")
+                else:
+                    print("Gemini usage_metadata not present on response")
+
                 data = json.loads(response.text)
                 
                 return (

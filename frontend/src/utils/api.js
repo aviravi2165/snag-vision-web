@@ -69,6 +69,16 @@ export const getProgressMatrix = (projectId, asOf) =>
   api.get(`/projects/${projectId}/progress`, { params: asOf ? { as_of: asOf } : {} })
 // Real overall-completion history — one measured point per capture date.
 export const getProgressSeries = (projectId) => api.get(`/projects/${projectId}/progress-series`)
+// Manual correction of one AI-scored cell. pct === null is a real value
+// ("Cannot Assess"), not a clear — clearing is clearProgressOverride below.
+export const overrideProgress = (projectId, { unitId, activityId, pct, note }) =>
+  api.put(`/projects/${projectId}/progress/override`, {
+    unit_id: unitId, activity_id: activityId, progress_pct: pct, note: note || null,
+  })
+export const clearProgressOverride = (projectId, { unitId, activityId }) =>
+  api.delete(`/projects/${projectId}/progress/override`, {
+    params: { unit_id: unitId, activity_id: activityId },
+  })
 
 // ─── AI Analysis jobs ("Start AI Analysis" — decoupled from upload) ─────────
 export const getPendingAnalysisCount = (projectId) => api.get(`/projects/${projectId}/analysis/pending-count`)

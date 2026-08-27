@@ -6,10 +6,10 @@ import toast from 'react-hot-toast'
 const MARKER_R = 13
 
 function statusColor(pct) {
-  if (pct === undefined || pct === null) return '#6366F1'
-  if (pct >= 80) return '#22C55E'
-  if (pct >= 50) return '#F5A623'
-  return '#EF4444'
+  if (pct === undefined || pct === null) return '#6E7DEC'
+  if (pct >= 80) return '#22B96B'
+  if (pct >= 50) return '#E8A317'
+  return '#E5484D'
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -117,7 +117,7 @@ export default function FloorMap() {
         const th = 22, tx = x - tw / 2, ty = y - MARKER_R - th - 8
         ctx.fillStyle = 'rgba(13,15,20,0.92)'; ctx.strokeStyle = color; ctx.lineWidth = 1.5
         roundRect(ctx, tx, ty, tw, th, 6); ctx.fill(); ctx.stroke()
-        ctx.fillStyle = '#F1F5F9'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.fillStyle = '#F4F6FC'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.fillText(text, x, ty + th / 2)
       }
     })
@@ -125,10 +125,10 @@ export default function FloorMap() {
     if (pendingClick) {
       const x = pendingClick.x_pct * canvas.width
       const y = pendingClick.y_pct * canvas.height
-      ctx.shadowColor = '#6366F1'; ctx.shadowBlur = 14
+      ctx.shadowColor = '#6E7DEC'; ctx.shadowBlur = 14
       ctx.beginPath(); ctx.arc(x, y, MARKER_R, 0, Math.PI * 2)
-      ctx.fillStyle = '#6366F188'; ctx.fill()
-      ctx.strokeStyle = '#6366F1'; ctx.lineWidth = 2; ctx.stroke()
+      ctx.fillStyle = '#6E7DEC88'; ctx.fill()
+      ctx.strokeStyle = '#6E7DEC'; ctx.lineWidth = 2; ctx.stroke()
       ctx.shadowBlur = 0
       ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Inter, sans-serif'
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
@@ -263,7 +263,7 @@ export default function FloorMap() {
 
             {hotspots.length > 0 && (
               <button className="btn-ghost" onClick={() => { if (window.confirm('Clear all hotspots?')) saveHotspots([]) }}
-                style={{ fontSize: 11, padding: '5px 10px', color: '#F87171', borderColor: '#F8717144' }}>
+                style={{ fontSize: 11, padding: '5px 10px', color: '#EE6A6A', borderColor: '#EE6A6A44' }}>
                 Clear all
               </button>
             )}
@@ -293,7 +293,7 @@ export default function FloorMap() {
             <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border-dim)',
               display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Click image to pin · Click marker to edit</span>
-              {[['#22C55E','≥80%'],['#F5A623','50–79%'],['#EF4444','<50%'],['#6366F1','Not analysed']].map(([c,t]) => (
+              {[['#22B96B','≥80%'],['#E8A317','50–79%'],['#E5484D','<50%'],['#6E7DEC','Not analysed']].map(([c,t]) => (
                 <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-3)' }}>
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: c }} />{t}
                 </div>
@@ -367,7 +367,7 @@ export default function FloorMap() {
             </button>
             {selHotspot && (
               <button className="btn-ghost" onClick={handleDelete}
-                style={{ width: '100%', color: '#F87171', borderColor: '#F8717144' }}>
+                style={{ width: '100%', color: '#EE6A6A', borderColor: '#EE6A6A44' }}>
                 Delete hotspot
               </button>
             )}

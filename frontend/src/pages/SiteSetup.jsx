@@ -322,7 +322,7 @@ export default function SiteSetup() {
           </button>
           {saved && (
             <button className="btn-ghost" onClick={() => navigate('/site-capture')}
-              style={{ borderColor: '#22C55E', color: '#2E7D32' }}>
+              style={{ borderColor: '#22B96B', color: '#12A05C' }}>
               → Capture Mode
             </button>
           )}
@@ -400,7 +400,7 @@ export default function SiteSetup() {
                     padding: '6px 8px', background: 'var(--bg-hover)', borderRadius: 8,
                     border: '1px solid var(--border-dim)' }}>
                     <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                      background: '#F5C842', boxShadow: '0 0 5px #F5C842' }} />
+                      background: '#E8A317', boxShadow: '0 0 5px #E8A317' }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -426,7 +426,7 @@ export default function SiteSetup() {
               <div>3. Scroll to zoom · drag to pan</div>
               <div>4. Click map → enter Room ID &amp; Name</div>
               <div>5. Right-click a dot to delete</div>
-              <div>6. Hit <strong style={{ color: 'var(--accent, #D32F2F)' }}>Save Floor Plan</strong></div>
+              <div>6. Hit <strong style={{ color: 'var(--accent, #DC3A3A)' }}>Save Floor Plan</strong></div>
             </div>
           </div>
         </div>
@@ -439,8 +439,8 @@ export default function SiteSetup() {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             background: 'var(--bg-surface)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#F5C842',
-                boxShadow: '0 0 6px #F5C842aa' }} />
+              <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#E8A317',
+                boxShadow: '0 0 6px #E8A317AA' }} />
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>
                 Floor {selectedFloor?.floor_number} · Mapping mode
               </span>
@@ -463,8 +463,8 @@ export default function SiteSetup() {
               position: 'relative',
               overflow: 'hidden',
               minHeight: 520,
-              background: '#f4f3f0',
-              backgroundImage: 'radial-gradient(#d0cfc9 1px, transparent 1px)',
+              background: '#F9FAFE',
+              backgroundImage: 'radial-gradient(#D2D9EC 1px, transparent 1px)',
               backgroundSize: '20px 20px',
               cursor: floorPlanUrl ? 'crosshair' : 'default',
               userSelect: 'none',
@@ -534,9 +534,9 @@ export default function SiteSetup() {
             boxShadow: '0 8px 32px rgba(0,0,0,0.12)', position: 'relative' }}>
             <div style={{ position: 'absolute', top: -1, left: '50%', transform: 'translateX(-50%)',
               width: 60, height: 2,
-              background: 'linear-gradient(90deg, transparent, #D32F2F, transparent)' }} />
+              background: 'linear-gradient(90deg, transparent, #DC3A3A, transparent)' }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 9, background: '#FFEBEE',
+              <div style={{ width: 34, height: 34, borderRadius: 9, background: '#FDECEC',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>
                 📍
               </div>
@@ -551,7 +551,7 @@ export default function SiteSetup() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
-                <label className="label">Room ID <span style={{ color: '#D32F2F' }}>*</span></label>
+                <label className="label">Room ID <span style={{ color: '#DC3A3A' }}>*</span></label>
                 <select
                   autoFocus
                   value={roomForm.unitId}
@@ -565,7 +565,7 @@ export default function SiteSetup() {
                 </select>
               </div>
               <div>
-                <label className="label">Area <span style={{ color: '#D32F2F' }}>*</span></label>
+                <label className="label">Area <span style={{ color: '#DC3A3A' }}>*</span></label>
                 <select
                   value={roomForm.roomId}
                   onChange={e => setRoomForm(f => ({ ...f, roomId: e.target.value }))}
@@ -613,8 +613,8 @@ export default function SiteSetup() {
             setContextMenu(null); setSaved(false)
           }} style={{ display: 'flex', alignItems: 'center', gap: 8,
             width: '100%', background: 'none', border: 'none', padding: '8px 12px',
-            cursor: 'pointer', color: '#C62828', fontSize: 13, borderRadius: 6 }}
-            onMouseOver={e => e.currentTarget.style.background = '#FFEBEE'}
+            cursor: 'pointer', color: '#DC3A3A', fontSize: 13, borderRadius: 6 }}
+            onMouseOver={e => e.currentTarget.style.background = '#FDECEC'}
             onMouseOut={e => e.currentTarget.style.background = 'none'}>
             🗑️ Delete hotspot
           </button>
@@ -639,9 +639,9 @@ export function HotspotDot({ hotspot, captured, active, hovered, zoom = 1,
   // caused the blur at high zoom — transform: scale() stays crisp at any factor.
   const dotScale = (hovered || active ? 1.3 : 1) / (zoom || 1)
 
-  const color = active   ? '#6366F1'
-              : captured ? '#22C55E'
-              : '#FF4D2E'
+  const color = active   ? '#6E7DEC'
+              : captured ? '#22B96B'
+              : '#E5484D'
   const border = '#000000'
 
   return (
@@ -687,9 +687,9 @@ function Loader() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
       height: 400, flexDirection: 'column', gap: 12 }}>
-      <div style={{ width: 26, height: 26, border: '2.5px solid #E5E5E5',
-        borderTopColor: '#D32F2F', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
-      <div style={{ fontSize: 13, color: '#666' }}>Loading…</div>
+      <div style={{ width: 26, height: 26, border: '2.5px solid #E6EAF5',
+        borderTopColor: '#DC3A3A', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
+      <div style={{ fontSize: 13, color: '#6A7699' }}>Loading…</div>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )

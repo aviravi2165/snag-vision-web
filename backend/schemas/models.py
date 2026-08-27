@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Dict, List, Any
 from datetime import datetime
 from models.database import UserRole, UploadStatus, IssueStatus, IssuePriority
@@ -73,6 +73,18 @@ class ActivityMappingIn(BaseModel):
     component_key: str
     activity_id: str
     confidence: float = 1.0
+
+
+class ProgressOverrideIn(BaseModel):
+    """A human correcting one (Unit, Activity) progress cell the AI got wrong.
+
+    `progress_pct` is Optional on purpose: None means "Cannot Assess", the
+    right answer when the AI produced a number it had no business producing.
+    Clearing the override entirely is a DELETE, not None."""
+    unit_id: str
+    activity_id: str
+    progress_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    note: Optional[str] = Field(default=None, max_length=500)
 
 
 # --- Floor / Unit / Room ---
