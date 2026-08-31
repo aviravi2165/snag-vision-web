@@ -36,8 +36,25 @@ export function ProjectProvider({ children }) {
     localStorage.setItem('siteiq_project_id', project.id)
   }
 
+  // Called after a project is deleted (Layout Setup's Projects column) — drops
+  // it from every consumer of this context, and if it was the active
+  // project, falls back to whatever's left (or null if this was the last one).
+  const removeProject = (projectId) => {
+    setProjects(prev => {
+      const next = prev.filter(p => p.id !== projectId)
+      setSelectedProject(current => {
+        if (current?.id !== projectId) return current
+        const fallback = next[0] || null
+        if (fallback) localStorage.setItem('siteiq_project_id', fallback.id)
+        else localStorage.removeItem('siteiq_project_id')
+        return fallback
+      })
+      return next
+    })
+  }
+
   return (
-    <ProjectCtx.Provider value={{ projects, selectedProject, switchProject, addProject, loading }}>
+    <ProjectCtx.Provider value={{ projects, selectedProject, switchProject, addProject, removeProject, loading }}>
       {children}
     </ProjectCtx.Provider>
   )

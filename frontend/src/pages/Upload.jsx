@@ -171,7 +171,7 @@ export default function Upload() {
                   {g.media.map(m => (
                     <div key={m.id} style={{ borderRadius: 10, overflow: 'hidden',
                       border: '1px solid var(--border)', background: 'var(--bg-hover)' }}>
-                      {m.media_type === 'photo' ? (
+                      {m.media_type !== 'video' ? (
                         <img src={m.gcs_url} alt={m.file_name || 'capture'}
                           style={{ width: '100%', height: 110, objectFit: 'cover', display: 'block' }} />
                       ) : (
