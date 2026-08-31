@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import toast from 'react-hot-toast'
 import {
-  createProject, getFloors, addFloor, getUnits, addUnit, getRooms, addRoom,
+  createProject, deleteProject, getFloors, addFloor, getUnits, addUnit, getRooms, addRoom,
   getActivities, setActivities as saveActivities,
   uploadActivityExcel, updateUnitMap,
 } from '../utils/api'
 import { useProject } from '../hooks/useProject'
 
-const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder, type = 'text' }) => {
+const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder, type = 'text', onDeleteItem }) => {
   const [val, setVal] = useState('')
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -24,17 +24,32 @@ const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder
         {items.length === 0 ? (
           <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '8px 0' }}>None yet</div>
         ) : items.map(item => (
-          <button key={item.id} onClick={() => onSelect(item.id)} style={{
+          <div key={item.id} style={{
+            display: 'flex', alignItems: 'center', gap: 4,
             background: selected === item.id ? 'var(--amber-glow)' : 'transparent',
             border: `1px solid ${selected === item.id ? 'var(--amber-dim)' : 'transparent'}`,
-            color: selected === item.id ? 'var(--amber)' : 'var(--text-2)',
-            borderRadius: 8, padding: '8px 12px', cursor: 'pointer',
-            fontSize: 13, textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            transition: 'all .15s',
+            borderRadius: 8, transition: 'all .15s',
           }}>
-            <span>{item.label}</span>
-            {item.sub !== undefined && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{Math.round(item.sub)}%</span>}
-          </button>
+            <button onClick={() => onSelect(item.id)} style={{
+              flex: 1, background: 'transparent', border: 'none',
+              color: selected === item.id ? 'var(--amber)' : 'var(--text-2)',
+              padding: '8px 12px', cursor: 'pointer',
+              fontSize: 13, textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <span>{item.label}</span>
+              {item.sub !== undefined && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{Math.round(item.sub)}%</span>}
+            </button>
+            {onDeleteItem && (
+              <button onClick={() => onDeleteItem(item)} title={`Delete ${item.label}`} style={{
+                background: 'transparent', border: 'none', color: 'var(--text-3)',
+                cursor: 'pointer', fontSize: 14, padding: '8px 10px', lineHeight: 1,
+              }}
+                onMouseEnter={e => { e.currentTarget.style.color = 'var(--danger-text)' }}
+                onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-3)' }}>
+                🗑
+              </button>
+            )}
+          </div>
         ))}
       </div>
     </div>
@@ -42,12 +57,12 @@ const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder
 }
 
 export default function Projects() {
-  const { projects, addProject, switchProject } = useProject()
+  const { projects, addProject, removeProject, switchProject } = useProject()
   const [floors, setFloors] = useState([])
   const [units, setUnits] = useState([])
   const [rooms, setRooms] = useState([])
   const [sel, setSel] = useState({ project: null, floor: null, unit: null })
-  const [newProj, setNewProj] = useState({ name: '', location: '', total_floors: 5, planned_completion: '' })
+  const [newProj, setNewProj] = useState({ name: '', location: '' })
 
   // ── Activity Plan (drives the Executive dashboard + AI prompt categories) ──
   // Each entry is { name, target_date } — target_date (YYYY-MM-DD or null) is
@@ -165,18 +180,35 @@ export default function Projects() {
 
   const handleCreate = async () => {
     if (!newProj.name) return
-    const payload = {
-    ...newProj,
-    total_floors: Number(newProj.total_floors),
-    planned_completion: newProj.planned_completion
-      ? new Date(newProj.planned_completion).toISOString()
-      : null,
+    // Floor count and completion date used to be asked here too, but floors
+    // are added one at a time in the Floors column right below, and the
+    // Activity Plan section further down already carries its own (more
+    // useful, per-activity) target dates — asking for a single project-wide
+    // guess of either up front was redundant with both.
+    const payload = { ...newProj, total_floors: 1, planned_completion: null }
+    const { data } = await createProject(payload)
+    addProject(data)
+    toast.success('Project created')
+    setNewProj({ name: '', location: '' })
   }
-  const { data } = await createProject(payload)
-  addProject(data)
-  toast.success('Project created')
-  setNewProj({ name: '', location: '', total_floors: 5, planned_completion: '' })
-}
+
+  const handleDeleteProject = async (project) => {
+    if (!window.confirm(
+      `Delete "${project.label}"? This permanently removes every floor, unit, room, photo, ` +
+      `walkthrough and issue under it. This cannot be undone.`
+    )) return
+    try {
+      await deleteProject(project.id)
+      removeProject(project.id)
+      // Only reset the hierarchy picker if the project being browsed is the
+      // one that just got deleted — deleting a different project shouldn't
+      // knock the user out of what they're currently looking at.
+      setSel(s => s.project === project.id ? { project: null, floor: null, unit: null } : s)
+      toast.success('Project deleted')
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to delete project')
+    }
+  }
 
   return (
     <div style={{ padding: 28, maxWidth: 1000 }}>
@@ -188,7 +220,7 @@ export default function Projects() {
       {/* Create project */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 14, marginBottom: 14 }}>New project</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 90px 130px auto', gap: 10, alignItems: 'end' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'end' }}>
           <div>
             <label className="label">Project name</label>
             <input placeholder="Skyline Residency" value={newProj.name} onChange={e => setNewProj({ ...newProj, name: e.target.value })} />
@@ -196,16 +228,6 @@ export default function Projects() {
         <div>
           <label className="label">Location</label>
           <input placeholder="Udaipur" value={newProj.location} onChange={e => setNewProj({ ...newProj, location: e.target.value })} />
-        </div>
-        <div>
-          <label className="label">Floors</label>
-          <input type="number" min={1} value={newProj.total_floors}
-            onChange={e => setNewProj({ ...newProj, total_floors: e.target.value === '' ? '' : Math.max(1, Number(e.target.value)) })} />
-        </div>
-        <div>
-          <label className="label">Target date</label>
-          <input type="date" value={newProj.planned_completion}
-            onChange={e => setNewProj({ ...newProj, planned_completion: e.target.value })} />
         </div>
         <button className="btn-primary" onClick={handleCreate} style={{ alignSelf: 'flex-end' }}>Create project</button>
       </div>
@@ -216,7 +238,8 @@ export default function Projects() {
           items={projects.map(p => ({ id: p.id, label: p.name, sub: undefined }))}
           selected={sel.project}
           onSelect={id => { setSel({ project: id, floor: null, unit: null }); switchProject(id) }}
-          onAdd={name => { createProject({ name, total_floors: 5 }).then(({ data }) => { addProject(data); toast.success('Project created') }) }} />
+          onAdd={name => { createProject({ name, total_floors: 1 }).then(({ data }) => { addProject(data); toast.success('Project created') }) }}
+          onDeleteItem={handleDeleteProject} />
 
         <Col title="Floors" addPlaceholder="Floor number" type="number"
           items={floors.map(f => ({ id: f.id, label: `Floor ${f.floor_number}`, sub: f.progress_pct }))}

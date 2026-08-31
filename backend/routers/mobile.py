@@ -18,6 +18,7 @@ from routers.auth import verify_pw, hash_pw, create_token, ALGORITHM
 from routers.uploads import _run_analysis
 from services.gcs_service import upload_media
 from services.walkthrough_service import require_capturable
+from services.image_service import detect_media_type
 
 router = APIRouter(prefix="/mobile", tags=["mobile"])
 
@@ -302,7 +303,7 @@ async def upload_photo(
         supervisor_id=user_id,
         gcs_url=gcs_url,
         gcs_path=gcs_path,
-        media_type="photo",
+        media_type=detect_media_type(contents, mime),
         file_name=image.filename,
         notes=f"checksum:{checksum}" if checksum else None,
         status=UploadStatus.analysing,

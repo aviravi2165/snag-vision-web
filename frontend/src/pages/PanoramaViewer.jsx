@@ -400,7 +400,11 @@ function useImageCascade(projectId) {
 
     const hasPhotos = (roomId) =>
       getRoomUploads(roomId)
-        .then(({ data }) => data.some(x => x.media_type === 'photo' && x.status !== 'failed'))
+        .then(({ data }) => data.some(x =>
+          // '360' is a real equirectangular capture, just as viewable as a flat
+          // 'photo' — only an actual video has nothing to show here.
+          (x.media_type === 'photo' || x.media_type === '360') && x.status !== 'failed'
+        ))
         .catch(() => false)
 
     Promise.all([
@@ -461,7 +465,9 @@ function useImageCascade(projectId) {
       .then(({ data }) => {
         console.log('[PanoramaViewer] raw uploads for', fetchId, ':', data)
         const filtered = data.filter(u =>
-          u.media_type === 'photo' && u.status !== 'failed' &&
+          // Same reasoning as hasPhotos() above — a 360 capture is a real,
+          // displayable upload and belongs in the Date list too.
+          (u.media_type === 'photo' || u.media_type === '360') && u.status !== 'failed' &&
           (selRoom.type !== 'spot' || u.spot_id === roomId)
         )
         console.log('[PanoramaViewer] filtered uploads (spot match against roomId', roomId, '):', filtered)
@@ -536,12 +542,21 @@ function FilterPanel({
     rooms, roomId, setRoomId, dateOptions, dateKey, setDateKey,
     activeUpload, loading, navigateTo } = cascade
 
-  // Mobile-captured spot photos are plain flat images, not true 360°
-  // equirectangular panoramas — the WebGL sphere viewer expects the latter
-  // and fails silently (no visible error) on anything else. Render those
-  // as a normal <img> instead; hotel-flow sub-room uploads keep the sphere.
+  // Which kind of room this is (spot = mobile-flow flat Room -> Spot,
+  // subroom = hotel-flow Unit -> Room) — used for issue-location taxonomy
+  // below, NOT for deciding how to render the photo (see isFlatPhoto).
   const selRoomType = rooms.find(r => r.id === roomId)?.type
-  const isFlatPhoto = selRoomType === 'spot'
+
+  // Sphere vs flat is a property of the PHOTO, not of which room picker path
+  // was used to reach it — mobile Spots used to be flat-only (phone camera),
+  // but now also receive real 360 equirectangular captures (Ricoh THETA X,
+  // stitched on-device), landing in the exact same kind of Spot. Rendering
+  // those as flat images made every mobile 360 photo look broken (no drag,
+  // no sphere) even though the file itself was a genuine panorama.
+  // media_type is set server-side from the actual image dimensions (see
+  // backend/services/image_service.py), so this now reflects the photo's
+  // real shape regardless of which flow captured it.
+  const isFlatPhoto = !!activeUpload && activeUpload.media_type !== '360'
 
   // ── Issue management ──────────────────────────────────────────────────────
   // Project-wide: the list shows every issue in the project, not just the
