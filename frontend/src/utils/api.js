@@ -33,6 +33,7 @@ export const register = (data) => api.post('/auth/register', data)
 // ─── Projects ────────────────────────────────────────────────────────────────
 export const getProjects = () => api.get('/projects')
 export const createProject = (data) => api.post('/projects', data)
+export const deleteProject = (id) => api.delete(`/projects/${id}`)
 export const getDashboard = (id) => api.get(`/projects/${id}/dashboard`)
 export const getFloors = (id) => api.get(`/projects/${id}/floors`)
 export const addFloor = (id, data) => api.post(`/projects/${id}/floors`, data)

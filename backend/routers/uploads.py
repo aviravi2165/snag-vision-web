@@ -9,6 +9,7 @@ from services.gcs_service import upload_media
 from services.gemini_service import analyse_image, compute_change_flag
 from services.progress_service import full_rollup
 from services.walkthrough_service import project_room_ids, require_capturable
+from services.image_service import detect_media_type
 from routers.walkthroughs import _walkthrough_out
 from routers.auth import get_current_user
 from typing import List
@@ -82,7 +83,10 @@ async def upload_file(
         raise HTTPException(413, f"File too large (max {MAX_SIZE_MB} MB)")
 
     mime = file.content_type or mimetypes.guess_type(file.filename)[0] or "image/jpeg"
-    media_type_label = "photo" if "image" in mime else "video" if "video" in mime else "360"
+    # Actual pixel shape, not a mime-type guess — a JPEG is "image/jpeg"
+    # whether it's a phone snapshot or a stitched 360 equirectangular photo,
+    # so mime alone can never tell them apart (see services/image_service.py).
+    media_type_label = detect_media_type(contents, mime)
 
     # Derive project_id from the room hierarchy (web: Unit -> Floor; mobile:
     # flat Room -> Floor).
