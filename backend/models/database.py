@@ -142,6 +142,11 @@ class Unit(Base):
     progress_pct = Column(Float, default=0.0)
     floor = relationship("Floor", back_populates="units")
     rooms = relationship("Room", back_populates="unit", cascade="all, delete")
+    # Deleting a project reaches these rows through Activity.unit_progress, but
+    # deleting a single Unit (or its Floor) has no such path — without this,
+    # MSSQL rejects the delete on unit_activity_progress.unit_id's FK as soon
+    # as AI analysis has produced any progress for the unit.
+    activity_progress = relationship("UnitActivityProgress", back_populates="unit", cascade="all, delete")
 
 
 class Room(Base):
@@ -412,7 +417,7 @@ class UnitActivityProgress(Base):
     overridden_by = Column(String(36), nullable=True)
     overridden_at = Column(DateTime, nullable=True)
 
-    unit = relationship("Unit")
+    unit = relationship("Unit", back_populates="activity_progress")
     activity = relationship("Activity", back_populates="unit_progress")
 
     @property

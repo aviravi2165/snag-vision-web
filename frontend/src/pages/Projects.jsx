@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import toast from 'react-hot-toast'
 import {
-  createProject, deleteProject, getFloors, addFloor, getUnits, addUnit, getRooms, addRoom,
+  createProject, deleteProject, deleteFloor, deleteUnit, deleteRoom, getFloors, addFloor, getUnits, addUnit, getRooms, addRoom,
   getActivities, setActivities as saveActivities,
   uploadActivityExcel, updateUnitMap,
 } from '../utils/api'
@@ -210,6 +210,49 @@ export default function Projects() {
     }
   }
 
+  // One handler for floors / units / rooms: confirm with what will be lost,
+  // call the API, drop the item from its column, and clear any selection
+  // that pointed at it (or at something underneath it).
+  const deleteLevel = async ({ item, kind, contents, request, removeFrom, clearSel }) => {
+    if (!window.confirm(
+      `Delete ${kind} "${item.label}"? This permanently removes ${contents}. This cannot be undone.`
+    )) return
+    try {
+      await request(item.id)
+      removeFrom(list => list.filter(x => x.id !== item.id))
+      clearSel()
+      toast.success(`${kind[0].toUpperCase()}${kind.slice(1)} deleted`)
+    } catch (e) {
+      toast.error(e.response?.status === 403
+        ? 'Only admins can delete'
+        : e.response?.data?.detail || `Failed to delete ${kind}`)
+    }
+  }
+
+  const handleDeleteFloor = item => deleteLevel({
+    item, kind: 'floor', request: deleteFloor, removeFrom: setFloors,
+    contents: "its units, rooms, photos and issues, plus this floor's plan image and hotspots",
+    clearSel: () => {
+      if (sel.floor === item.id) { setUnits([]); setRooms([]) }
+      setSel(s => s.floor === item.id ? { ...s, floor: null, unit: null } : s)
+    },
+  })
+
+  const handleDeleteUnit = item => deleteLevel({
+    item, kind: 'unit', request: deleteUnit, removeFrom: setUnits,
+    contents: 'its rooms, photos, AI progress and issues',
+    clearSel: () => {
+      if (sel.unit === item.id) setRooms([])
+      setSel(s => s.unit === item.id ? { ...s, unit: null } : s)
+    },
+  })
+
+  const handleDeleteRoom = item => deleteLevel({
+    item, kind: 'room', request: deleteRoom, removeFrom: setRooms,
+    contents: 'its spots, photos and issues',
+    clearSel: () => {},
+  })
+
   return (
     <div style={{ padding: 28, maxWidth: 1000 }}>
       <div style={{ marginBottom: 24 }}>
@@ -247,7 +290,8 @@ export default function Projects() {
           onAdd={n => {
             if (!sel.project) { toast.error('Select a project first'); return }
             addFloor(sel.project, { floor_number: Number(n) }).then(({ data }) => setFloors(f => [...f, data]))
-          }} />
+          }}
+          onDeleteItem={handleDeleteFloor} />
 
         <Col title="Units" addPlaceholder="Unit (e.g. A-204)"
           items={units.map(u => ({ id: u.id, label: u.unit_number, sub: u.progress_pct }))}
@@ -255,7 +299,8 @@ export default function Projects() {
           onAdd={n => {
             if (!sel.floor) { toast.error('Select a floor first'); return }
             addUnit(sel.floor, { unit_number: n }).then(({ data }) => setUnits(u => [...u, data]))
-          }} />
+          }}
+          onDeleteItem={handleDeleteUnit} />
 
         <Col title="Rooms" addPlaceholder="Room name"
           items={rooms.map(r => ({ id: r.id, label: r.name, sub: r.progress_pct }))}
@@ -263,7 +308,8 @@ export default function Projects() {
           onAdd={n => {
             if (!sel.unit) { toast.error('Select a unit first'); return }
             addRoom(sel.unit, { name: n }).then(({ data }) => setRooms(r => [...r, data])).then(() => toast.success('Room added'))
-          }} />
+          }}
+          onDeleteItem={handleDeleteRoom} />
       </div>
 
       {/* Activity Plan — feeds both the Executive dashboard and the Gemini prompt */}

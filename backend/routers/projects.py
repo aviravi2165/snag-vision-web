@@ -5,6 +5,7 @@ from models import get_db
 from models.database import (
     Project, Floor, Unit, Room, Spot, UserRole, User,
     Activity, ActivityMapping, UnmappedComponent, UnitActivityProgress, ActivityExcelFile,
+    FloorPlan, Hotspot, Marker,
 )
 from schemas.models import (
     ProjectCreate, ProjectOut, FloorCreate, FloorOut,
@@ -622,6 +623,77 @@ def add_room_to_floor(floor_id: str, data: RoomCreate, db: Session = Depends(get
 @router.get("/floors/{floor_id}/rooms", response_model=List[RoomOut])
 def list_rooms_for_floor(floor_id: str, db: Session = Depends(get_db)):
     return db.query(Room).filter(Room.floor_id == floor_id).all()
+
+
+# ── Deleting part of the hierarchy ────────────────────────────────────────────
+# The ORM cascades (Floor -> Unit -> Room -> uploads/spots/analyses) handle
+# everything linked by a real foreign key. What they can't see is data that
+# points at a floor/room by plain id or by floor *number*: issue markers
+# (location_id / parent_location_id / floor_id are bare strings) and Layout
+# Setup's floor plans + hotspots (keyed by project_id + floor_number). Left
+# behind, a floor plan and its hotspots would silently reattach to any new
+# floor given the same number, and issues would point at locations that no
+# longer exist — so each delete below clears those explicitly.
+
+def _room_and_spot_ids(rooms: List[Room]) -> List[str]:
+    ids = []
+    for r in rooms:
+        ids.append(r.id)
+        ids.extend(s.id for s in r.spots)
+    return ids
+
+
+def _delete_markers_at(db: Session, location_ids: List[str]):
+    """Markers anchored to any of these rooms/spots/units. Deleted through the
+    ORM (not a bulk DELETE) so each marker's issues and their comments cascade."""
+    if not location_ids:
+        return
+    markers = db.query(Marker).filter(
+        (Marker.location_id.in_(location_ids)) | (Marker.parent_location_id.in_(location_ids))
+    ).all()
+    for m in markers:
+        db.delete(m)
+
+
+@router.delete("/floors/{floor_id}", status_code=204)
+def delete_floor(floor_id: str, db: Session = Depends(get_db), user=Depends(require_role(UserRole.admin))):
+    floor = db.query(Floor).get(floor_id)
+    if not floor:
+        raise HTTPException(404, "Floor not found")
+    rooms = list(floor.rooms) + [r for u in floor.units for r in u.rooms]
+    _delete_markers_at(db, _room_and_spot_ids(rooms) + [u.id for u in floor.units])
+    for m in db.query(Marker).filter(Marker.floor_id == floor.id).all():
+        db.delete(m)
+    for fp in db.query(FloorPlan).filter(
+            FloorPlan.project_id == floor.project_id, FloorPlan.floor_number == floor.floor_number).all():
+        db.delete(fp)
+    for hs in db.query(Hotspot).filter(
+            Hotspot.project_id == floor.project_id, Hotspot.floor_number == floor.floor_number).all():
+        db.delete(hs)                       # cascades to its HotspotCaptures
+    db.delete(floor)
+    db.commit()
+
+
+@router.delete("/units/{unit_id}", status_code=204)
+def delete_unit(unit_id: str, db: Session = Depends(get_db), user=Depends(require_role(UserRole.admin))):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(404, "Unit not found")
+    _delete_markers_at(db, _room_and_spot_ids(list(unit.rooms)) + [unit.id])
+    db.delete(unit)
+    db.commit()
+
+
+@router.delete("/rooms/{room_id}", status_code=204)
+def delete_room(room_id: str, db: Session = Depends(get_db), user=Depends(require_role(UserRole.admin))):
+    room = db.query(Room).get(room_id)
+    if not room:
+        raise HTTPException(404, "Room not found")
+    _delete_markers_at(db, _room_and_spot_ids([room]))
+    for hs in db.query(Hotspot).filter(Hotspot.room_id == room.id).all():
+        db.delete(hs)
+    db.delete(room)
+    db.commit()
 
 
 # ── Spots ─────────────────────────────────────────────────────────────────────
