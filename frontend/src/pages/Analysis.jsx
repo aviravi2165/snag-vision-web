@@ -4,6 +4,7 @@ import { useProject } from '../hooks/useProject'   // ← global project context
 import { Spinner, ProgressBar, StatusBadge, ProgressRing, Empty, SectionTitle } from '../components/UI'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { STANDARD_ACTIVITIES } from '../utils/standardActivities'
+import { AnalysisFindings } from '../components/AiInsights'
 
 const CT = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
@@ -141,7 +142,7 @@ export default function AnalysisPage() {
       {loading ? <Spinner /> : !selRoom ? (
         <div className="card"><Empty message="No room selected" hint="Select Floor → Unit → Room above" /></div>
       ) : !analysis ? (
-        <div className="card"><Empty message="No analysis yet for this room" hint="Upload a photo from the Upload tab to trigger Gemini AI" /></div>
+        <div className="card"><Empty message="No analysis yet for this room" hint="Upload photos, then press Start AI Analysis on the Upload page" /></div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -156,11 +157,14 @@ export default function AnalysisPage() {
                   <div style={{ fontSize: 28, fontFamily: 'Space Grotesk', fontWeight: 700, color: 'var(--text-1)', lineHeight: 1 }}>
                     {Math.round(analysis.overall_pct)}%
                   </div>
-                  {analysis.delta_pct !== null && (
-                    <div style={{ fontSize: 12, marginTop: 4, color: analysis.delta_pct > 0 ? '#3ECF86' : '#EE6A6A' }}>
-                      {analysis.delta_pct > 0 ? '↑' : '↓'} {Math.abs(analysis.delta_pct)}% vs last visit
-                    </div>
-                  )}
+                  {/* "No change" and a first inspection used to render as a red "↓ 0%". */}
+                  <div style={{ fontSize: 12, marginTop: 4,
+                    color: analysis.prev_overall_pct == null || !analysis.delta_pct ? 'var(--text-3)'
+                      : analysis.delta_pct > 0 ? '#3ECF86' : '#EE6A6A' }}>
+                    {analysis.prev_overall_pct == null ? 'First inspection'
+                      : !analysis.delta_pct ? 'No change since last visit'
+                      : `${analysis.delta_pct > 0 ? '↑' : '↓'} ${Math.abs(analysis.delta_pct)}% vs last visit`}
+                  </div>
                 </div>
               </div>
 
@@ -192,15 +196,19 @@ export default function AnalysisPage() {
               <SectionTitle>Component radar</SectionTitle>
               {radarData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={220}>
-                  <RadarChart data={radarData}>
-                    <PolarGrid stroke="rgba(255,255,255,.06)" />
+                  <RadarChart data={radarData} margin={{ top: 10, right: 70, bottom: 10, left: 70 }}>
+                    <PolarGrid stroke="#E6EAF5" />
                     <PolarAngleAxis dataKey="s" tick={{ fontSize: 9, fill: 'var(--text-3)' }} />
-                    <Radar dataKey="v" stroke="var(--amber)" fill="var(--amber)" fillOpacity={0.15} strokeWidth={2} />
+                    {/* isAnimationActive off: recharts 2.15 can leave the polygon stranded mid-animation (same workaround as the dashboard charts) */}
+                    <Radar dataKey="v" stroke="var(--amber)" fill="var(--amber)" fillOpacity={0.15} strokeWidth={2} isAnimationActive={false} />
                   </RadarChart>
                 </ResponsiveContainer>
               ) : <Empty message="No component data" />}
             </div>
           </div>
+
+          {/* Defects, safety, pending work, materials, photo quality */}
+          <AnalysisFindings details={analysis.details} components={analysis.components} />
 
           {/* Progress over time */}
           <div className="card">
@@ -208,7 +216,7 @@ export default function AnalysisPage() {
             {histChart.length > 1 ? (
               <ResponsiveContainer width="100%" height={160}>
                 <LineChart data={histChart}>
-                  <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,.04)" />
+                  <CartesianGrid strokeDasharray="2 4" stroke="#EDEFF7" />
                   <XAxis dataKey="visit" tick={{ fontSize: 11, fill: 'var(--text-3)' }} axisLine={false} tickLine={false} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: 'var(--text-3)' }} axisLine={false} tickLine={false} />
                   <Tooltip content={<CT />} />

@@ -1,18 +1,20 @@
 from datetime import datetime
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response
 from sqlalchemy.orm import Session
 from models import get_db
 from models.database import (
     Project, Floor, Unit, Room, Spot, UserRole, User,
     Activity, ActivityMapping, UnmappedComponent, UnitActivityProgress, ActivityExcelFile,
+    FloorPlan, Hotspot, HotspotCapture, Marker, MediaUpload,
 )
 from schemas.models import (
-    ProjectCreate, ProjectOut, FloorCreate, FloorOut,
+    ProjectCreate, ProjectUpdate, ProjectOut, FloorCreate, FloorOut,
     UnitCreate, RoomCreate, RoomOut, SpotCreate, SpotOut,
     ActivityPlanIn, ActivityItem, UnitMapIn, ActivityMappingIn, ProgressOverrideIn,
 )
 from services.progress_service import build_dashboard
-from services.gcs_service import upload_media, download_media
+from services.gcs_service import upload_media, download_media, delete_media, LOCAL_UPLOAD_DIR
 from services.excel_service import parse_activity_excel, match_unit_columns
 from services.mapping_service import (
     generate_ai_mapping, unit_activity_matrix_as_of, analysis_dates_for_project,
@@ -20,7 +22,7 @@ from services.mapping_service import (
 )
 from services.activity_catalog import STANDARD_ACTIVITIES, refresh_standard_classification
 from routers.auth import get_current_user, require_role
-from typing import List
+from typing import List, Optional
 
 # Any logged-in user (site_supervisor/project_manager/admin/client) can use
 # this router today — the web frontend has no role-specific UI yet, so
@@ -54,8 +56,92 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     return p
 
 
+@router.patch("/{project_id}", response_model=ProjectOut)
+def update_project(
+    project_id: str,
+    data: ProjectUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(UserRole.admin, UserRole.project_manager)),
+):
+    p = db.query(Project).get(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+    changes = data.model_dump(exclude_unset=True)
+    if "name" in changes and not (changes["name"] or "").strip():
+        raise HTTPException(400, "Project name can't be empty")
+    for field, value in changes.items():
+        setattr(p, field, value)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+# ── Files behind deleted rows ─────────────────────────────────────────────────
+# Every delete (project / floor / unit / room) collects the files its rows
+# point at *before* deleting, then removes the ones nothing else still uses
+# once the delete is committed. Local files are referenced either by storage
+# path (uploads/<name>) or by served URL (/uploads/<name>); both normalise to
+# the storage path.
+
+def _file_key(ref: Optional[str]) -> Optional[str]:
+    if not ref:
+        return None
+    if ref.startswith("/uploads/"):
+        return str(LOCAL_UPLOAD_DIR / Path(ref).name)
+    if ref.startswith("http"):           # a public URL — its object is covered by gcs_path
+        return None
+    return ref                           # a storage path (local or GCS object)
+
+
+def _files_of_rooms(rooms) -> set:
+    return {k for r in rooms for up in r.uploads if (k := _file_key(up.gcs_path))}
+
+
+def _files_of_hotspots(hotspots) -> set:
+    return {k for hs in hotspots for cap in hs.captures if (k := _file_key(cap.image_url))}
+
+
+def _project_file_keys(p: Project) -> set:
+    """Photos, floor plan images, Layout Setup captures and the Activity Excel."""
+    keys = set()
+    for f in p.floors:
+        keys |= _files_of_rooms(list(f.rooms) + [r for u in f.units for r in u.rooms])
+        keys.add(_file_key(f.plan_image_url))
+    keys |= {_file_key(fp.image_url) for fp in p.floor_plans}
+    keys |= _files_of_hotspots(p.hotspots)
+    keys |= {_file_key(xl.file_path) for xl in p.activity_excel_file}
+    keys.discard(None)
+    return keys
+
+
+async def _remove_unreferenced_files(db: Session, keys: set, context: str):
+    """Runs after the delete is committed, so a failed delete never leaves rows
+    pointing at missing files. Best-effort: a file that's already gone or can't
+    be removed must not fail a delete that already succeeded."""
+    for key in keys:
+        if _still_referenced(db, key):
+            continue
+        try:
+            await delete_media(key)
+        except Exception as e:
+            print(f"{context}: could not remove file {key}: {e}")
+
+
+def _still_referenced(db: Session, key: str) -> bool:
+    """True if any remaining row still points at this file — never delete a
+    file another project (or the demo seed) shares."""
+    url = f"/uploads/{Path(key).name}"
+    return any([
+        db.query(MediaUpload.id).filter(MediaUpload.gcs_path == key).first(),
+        db.query(Floor.id).filter(Floor.plan_image_url == url).first(),
+        db.query(FloorPlan.id).filter(FloorPlan.image_url == url).first(),
+        db.query(HotspotCapture.id).filter(HotspotCapture.image_url == url).first(),
+        db.query(ActivityExcelFile.id).filter(ActivityExcelFile.file_path == key).first(),
+    ])
+
+
 @router.delete("/{project_id}", status_code=204)
-def delete_project(
+async def delete_project(
     project_id: str,
     db: Session = Depends(get_db),
     user=Depends(require_role(UserRole.admin)),
@@ -63,8 +149,10 @@ def delete_project(
     p = db.query(Project).get(project_id)
     if not p:
         raise HTTPException(404, "Project not found")
+    files = _project_file_keys(p)        # collect before the rows are gone
     db.delete(p)
     db.commit()
+    await _remove_unreferenced_files(db, files, "delete_project")
 
 
 @router.get("/{project_id}/dashboard")
@@ -622,6 +710,96 @@ def add_room_to_floor(floor_id: str, data: RoomCreate, db: Session = Depends(get
 @router.get("/floors/{floor_id}/rooms", response_model=List[RoomOut])
 def list_rooms_for_floor(floor_id: str, db: Session = Depends(get_db)):
     return db.query(Room).filter(Room.floor_id == floor_id).all()
+
+
+# ── Deleting part of the hierarchy ────────────────────────────────────────────
+# The ORM cascades (Floor -> Unit -> Room -> uploads/spots/analyses) handle
+# everything linked by a real foreign key. What they can't see is data that
+# points at a floor/room by plain id or by floor *number*: issue markers
+# (location_id / parent_location_id / floor_id are bare strings) and Layout
+# Setup's floor plans + hotspots (keyed by project_id + floor_number). Left
+# behind, a floor plan and its hotspots would silently reattach to any new
+# floor given the same number, and issues would point at locations that no
+# longer exist — so each delete below clears those explicitly.
+
+def _room_and_spot_ids(rooms: List[Room]) -> List[str]:
+    ids = []
+    for r in rooms:
+        ids.append(r.id)
+        ids.extend(s.id for s in r.spots)
+    return ids
+
+
+def _delete_markers_at(db: Session, location_ids: List[str]):
+    """Markers anchored to any of these rooms/spots/units. Deleted through the
+    ORM (not a bulk DELETE) so each marker's issues and their comments cascade."""
+    if not location_ids:
+        return
+    markers = db.query(Marker).filter(
+        (Marker.location_id.in_(location_ids)) | (Marker.parent_location_id.in_(location_ids))
+    ).all()
+    for m in markers:
+        db.delete(m)
+
+
+@router.delete("/floors/{floor_id}", status_code=204)
+async def delete_floor(floor_id: str, db: Session = Depends(get_db), user=Depends(require_role(UserRole.admin))):
+    floor = db.query(Floor).get(floor_id)
+    if not floor:
+        raise HTTPException(404, "Floor not found")
+    rooms = list(floor.rooms) + [r for u in floor.units for r in u.rooms]
+    plans = db.query(FloorPlan).filter(
+        FloorPlan.project_id == floor.project_id, FloorPlan.floor_number == floor.floor_number).all()
+    hotspots = db.query(Hotspot).filter(
+        Hotspot.project_id == floor.project_id, Hotspot.floor_number == floor.floor_number).all()
+    files = _files_of_rooms(rooms) | _files_of_hotspots(hotspots)
+    files |= {k for k in [_file_key(floor.plan_image_url), *(_file_key(fp.image_url) for fp in plans)] if k}
+
+    _delete_markers_at(db, _room_and_spot_ids(rooms) + [u.id for u in floor.units])
+    for m in db.query(Marker).filter(Marker.floor_id == floor.id).all():
+        db.delete(m)
+    for fp in plans:
+        db.delete(fp)
+    for hs in hotspots:
+        db.delete(hs)                       # cascades to its HotspotCaptures
+    db.delete(floor)
+    db.commit()
+    await _remove_unreferenced_files(db, files, "delete_floor")
+
+
+@router.delete("/units/{unit_id}", status_code=204)
+async def delete_unit(unit_id: str, db: Session = Depends(get_db), user=Depends(require_role(UserRole.admin))):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(404, "Unit not found")
+    rooms = list(unit.rooms)
+    # Layout Setup pins linked to these rooms would otherwise point at rooms
+    # that no longer exist (same as delete_room below).
+    hotspots = db.query(Hotspot).filter(Hotspot.room_id.in_([r.id for r in rooms])).all() if rooms else []
+    files = _files_of_rooms(rooms) | _files_of_hotspots(hotspots)
+
+    _delete_markers_at(db, _room_and_spot_ids(rooms) + [unit.id])
+    for hs in hotspots:
+        db.delete(hs)
+    db.delete(unit)
+    db.commit()
+    await _remove_unreferenced_files(db, files, "delete_unit")
+
+
+@router.delete("/rooms/{room_id}", status_code=204)
+async def delete_room(room_id: str, db: Session = Depends(get_db), user=Depends(require_role(UserRole.admin))):
+    room = db.query(Room).get(room_id)
+    if not room:
+        raise HTTPException(404, "Room not found")
+    hotspots = db.query(Hotspot).filter(Hotspot.room_id == room.id).all()
+    files = _files_of_rooms([room]) | _files_of_hotspots(hotspots)
+
+    _delete_markers_at(db, _room_and_spot_ids([room]))
+    for hs in hotspots:
+        db.delete(hs)
+    db.delete(room)
+    db.commit()
+    await _remove_unreferenced_files(db, files, "delete_room")
 
 
 # ── Spots ─────────────────────────────────────────────────────────────────────

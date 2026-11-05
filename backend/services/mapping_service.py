@@ -29,8 +29,7 @@ from models.database import (
     Activity, ActivityMapping, UnmappedComponent, UnitActivityProgress,
     Unit, Floor, AIAnalysis, Project,
 )
-from services.gemini_service import _get_client, slugify_activity
-from google.genai import types
+from services.gemini_service import generate_json, slugify_activity
 
 
 def _mapping_prompt(activity_names: List[str]) -> str:
@@ -72,12 +71,7 @@ async def generate_ai_mapping(project_id: str, activities: List[Activity], db: S
 
     prompt = _mapping_prompt([a.name for a in activities])
     try:
-        response = await _get_client().aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[prompt],
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        data = json.loads(response.text)
+        data = await generate_json(prompt)
     except Exception as e:
         print(f"generate_ai_mapping error: {e}")
         return 0
@@ -213,12 +207,7 @@ is an object: {{"activity": "<exact activity name from the list>",
 "confidence": <0.0-1.0>}}. Omit labels that fit no activity.
 """
     try:
-        response = await _get_client().aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[prompt],
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        data = json.loads(response.text)
+        data = await generate_json(prompt)
     except Exception as e:
         print(f"classify_observed_components error: {e}")
         return 0

@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, Dict, List, Any
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Optional, Dict, List, Any, Literal
 from datetime import datetime
 from models.database import UserRole, UploadStatus, IssueStatus, IssuePriority
 
@@ -30,6 +30,9 @@ class LoginIn(BaseModel):
 
 
 # --- Project ---
+ProjectStatus = Literal["not_started", "ongoing", "completed"]
+
+
 class ProjectCreate(BaseModel):
     name: str
     location: Optional[str] = None
@@ -38,6 +41,15 @@ class ProjectCreate(BaseModel):
     estimated_completion_date: Optional[datetime] = None
     folder: Optional[str] = None
     city: Optional[str] = None
+    status: ProjectStatus = "not_started"
+
+
+class ProjectUpdate(BaseModel):
+    """Partial update — only the fields sent are changed."""
+    name: Optional[str] = None
+    location: Optional[str] = None
+    status: Optional[ProjectStatus] = None
+
 
 class ProjectOut(BaseModel):
     id: str
@@ -49,6 +61,13 @@ class ProjectOut(BaseModel):
     progress_pct: Optional[float] = None
     folder: Optional[str] = None
     city: Optional[str] = None
+    status: str = "not_started"
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _default_status(cls, v):
+        return v or "not_started"     # projects created before the column existed
+
     class Config:
         from_attributes = True
 
