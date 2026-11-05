@@ -53,8 +53,15 @@ export function ProjectProvider({ children }) {
     })
   }
 
+  // Called after a project is edited (e.g. its status) so the list and the
+  // active project everywhere show the saved values without a reload.
+  const replaceProject = (project) => {
+    setProjects(prev => prev.map(p => (p.id === project.id ? project : p)))
+    setSelectedProject(current => (current?.id === project.id ? project : current))
+  }
+
   return (
-    <ProjectCtx.Provider value={{ projects, selectedProject, switchProject, addProject, removeProject, loading }}>
+    <ProjectCtx.Provider value={{ projects, selectedProject, switchProject, addProject, removeProject, replaceProject, loading }}>
       {children}
     </ProjectCtx.Provider>
   )

@@ -20,14 +20,94 @@ from models.database import (
 )
 from services.gcs_service import download_media
 from services.gemini_service import analyse_image, compute_change_flag
-from services.mapping_service import recompute_unit_activity_progress
+from services.mapping_service import recompute_unit_activity_progress, classify_observed_components
+from services.activity_catalog import refresh_standard_classification
 from services.progress_service import full_rollup
 from services.excel_service import sync_excel_progress
-from models.database import AIAnalysis, ActivityExcelFile, Activity
+from models.database import AIAnalysis, ActivityExcelFile, Activity, ActivityMapping
 
 POLL_INTERVAL_SECONDS = 3
 MAX_CONCURRENT_ANALYSES = 4
-PER_IMAGE_RETRIES = 2
+# analyse_image already retries transient errors and falls back across models;
+# this outer retry only covers a reply that came back unusable.
+PER_IMAGE_RETRIES = 1
+
+
+def recover_interrupted_jobs() -> int:
+    """Run once at startup, before the worker loop. The worker lives inside the
+    server process, so a restart (deploy, crash, or just saving a file under
+    `uvicorn --reload`) kills any job mid-run — and nothing ever picked it up
+    again: it stayed `running` forever, its photos stuck at `analysing`, the
+    walkthrough stuck at `ai_processing`. On a fresh start no job can genuinely
+    be running, so every `running` job is re-queued and resumes where it
+    stopped (finished photos are kept and skipped)."""
+    db = SessionLocal()
+    try:
+        jobs = db.query(AnalysisJob).filter(AnalysisJob.status == AnalysisJobStatus.running).all()
+        for job in jobs:
+            uploads = db.query(MediaUpload).filter(MediaUpload.job_id == job.id).all()
+            for u in uploads:
+                if u.status in (UploadStatus.analysing, UploadStatus.failed):
+                    u.status = UploadStatus.pending
+            job.status = AnalysisJobStatus.pending
+            job.processed_images = sum(1 for u in uploads if u.status == UploadStatus.done)
+            job.failed_images = 0
+        # Photos left mid-analysis with no job to resume them: make them
+        # pending again so the next "Start AI Analysis" includes them.
+        orphans = (
+            db.query(MediaUpload)
+            .filter(MediaUpload.status == UploadStatus.analysing, MediaUpload.job_id.is_(None))
+            .all()
+        )
+        for u in orphans:
+            u.status = UploadStatus.pending
+        db.commit()
+        if jobs or orphans:
+            print(f"recover_interrupted_jobs: re-queued {len(jobs)} job(s), reset {len(orphans)} orphaned photo(s)")
+        return len(jobs)
+    finally:
+        db.close()
+
+
+async def _classify_new_components(project_id: str, job_id: str, db) -> None:
+    """Sort the component names this job's photos produced into categories so
+    they show up straight away: the standard 12-category breakdown (AI analysis
+    page, Floor View) and — when the project has an Activity plan — its
+    activities (Executive dashboard, Activity Excel). Both used to run only from
+    a manual endpoint nothing called, so any newly named component was silently
+    left out of every breakdown. Each step is a no-op when nothing is new."""
+    new_keys = set()
+    analyses = (
+        db.query(AIAnalysis).join(MediaUpload, AIAnalysis.upload_id == MediaUpload.id)
+        .filter(MediaUpload.job_id == job_id).all()
+    )
+    for a in analyses:
+        new_keys.update((a.components or {}).keys())
+    if not new_keys:
+        return
+    try:
+        await refresh_standard_classification(db)
+    except Exception as e:
+        print(f"standard classification skipped: {e}")
+    try:
+        has_plan = db.query(Activity).filter(Activity.project_id == project_id).count() > 0
+        mapped = {m.component_key for m in db.query(ActivityMapping).filter(ActivityMapping.project_id == project_id)}
+        if has_plan and new_keys - mapped:
+            await classify_observed_components(project_id, db)
+    except Exception as e:
+        print(f"activity mapping skipped: {e}")
+
+
+def _room_label(room: Room) -> str:
+    """'Floor 1 > Unit A-101 > Bathroom' — gives the AI context for the photo."""
+    parts = []
+    floor = room.unit.floor if room.unit else room.floor
+    if floor:
+        parts.append(f"Floor {floor.floor_number}")
+    if room.unit:
+        parts.append(f"Unit {room.unit.unit_number}")
+    parts.append(room.name)
+    return " > ".join(parts)
 
 
 async def job_worker_loop():
@@ -77,9 +157,13 @@ async def _run_job(job_id: str):
             async with semaphore:
                 await _analyse_one_upload(upload_id, job_id)
 
-        await asyncio.gather(*(process_one(u.id) for u in uploads))
+        # Skip uploads already analysed: a job resumed after a restart (see
+        # recover_interrupted_jobs) only redoes the photos it didn't finish.
+        await asyncio.gather(*(process_one(u.id) for u in uploads if u.status != UploadStatus.done))
 
         db.refresh(job)
+        # Before progress is recomputed, so newly named components count now.
+        await _classify_new_components(job.project_id, job_id, db)
         touched_room_ids = {u.room_id for u in uploads}
         # Floor View's own rollup stays keyed by Area (Room) — untouched by this refactor.
         for room_id in touched_room_ids:
@@ -156,8 +240,9 @@ async def _analyse_one_upload(upload_id: str, job_id: str):
         image_bytes = await download_media(upload.gcs_path)
 
         raw_data, overall_pct, notes, error = {}, 0, "", None
+        room_label = _room_label(room)
         for attempt in range(PER_IMAGE_RETRIES + 1):
-            raw_data, overall_pct, notes = await analyse_image(image_bytes, upload.media_type, room.name)
+            raw_data, overall_pct, notes = await analyse_image(image_bytes, upload.media_type, room_label)
             if raw_data:
                 error = None
                 break
@@ -168,6 +253,9 @@ async def _analyse_one_upload(upload_id: str, job_id: str):
             upload.status = UploadStatus.failed
             if job:
                 job.failed_images += 1
+                # Keep the reason (e.g. "model overloaded", "invalid key") so the
+                # Upload page can say why, not just how many failed.
+                job.error_message = (error or "AI analysis failed")[:500]
             db.commit()
             return
 
@@ -190,6 +278,7 @@ async def _analyse_one_upload(upload_id: str, job_id: str):
             prev_overall_pct=prev_pct,
             delta_pct=delta,
             change_flag=flag,
+            details=raw_data.get("details"),
         )
         db.add(analysis)
         upload.status = UploadStatus.done

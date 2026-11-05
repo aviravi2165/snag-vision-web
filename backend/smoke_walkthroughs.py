@@ -27,6 +27,17 @@ async def _fake_analyse(image_bytes, media_type, room_name, activity_names=None)
 
 job_worker_mod.analyse_image = _fake_analyse
 
+
+# The job also classifies newly seen component names with a text-only Gemini call
+# (services/activity_catalog.py, services/mapping_service.py) — stub that too.
+async def _fake_generate_json(prompt):
+    return {}
+
+import services.activity_catalog as _activity_catalog  # noqa: E402
+import services.mapping_service as _mapping_service  # noqa: E402
+_activity_catalog.generate_json = _fake_generate_json
+_mapping_service.generate_json = _fake_generate_json
+
 from fastapi.testclient import TestClient  # noqa: E402
 import main  # noqa: E402
 from models import SessionLocal, engine  # noqa: E402

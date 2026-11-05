@@ -88,6 +88,10 @@ class Project(Base):
     # so existing web-created projects don't need backfilling.
     folder = Column(String(255), nullable=True)
     city = Column(String(255), nullable=True)
+    # "not_started" | "ongoing" | "completed" — set by hand, not derived from
+    # progress. Nullable because the self-healing migration adds it to existing
+    # databases as NULL; the API reads NULL as "not_started".
+    status = Column(String(20), nullable=True, default="not_started")
     floors = relationship("Floor", back_populates="project", cascade="all, delete")
     milestones = relationship("Milestone", back_populates="project", cascade="all, delete")
     estimated_completion_date = Column(DateTime, nullable=True)
@@ -200,6 +204,13 @@ class MediaUpload(Base):
     # Project.markers — so this is purely an ordering fix, not a new deletion
     # policy.
     origin_markers = relationship("Marker", cascade="all, delete", foreign_keys="Marker.origin_upload_id")
+    # Site Capture's per-pin pointers (hotspot_captures.media_upload_id is a
+    # real FK). Without this, deleting a unit/room/floor/project whose photos
+    # came through Site Capture was rejected by MSSQL — the pointer still
+    # referenced the upload being deleted. A pointer is meaningless once its
+    # upload is gone, so it goes with it.
+    hotspot_captures = relationship("HotspotCapture", cascade="all, delete",
+                                    foreign_keys="HotspotCapture.media_upload_id")
 
 
 class Spot(Base):
@@ -244,6 +255,11 @@ class AIAnalysis(Base):
     prev_overall_pct = Column(Float)   # for change detection
     delta_pct = Column(Float)
     change_flag = Column(String)        # progress / stalled / rework
+    # Everything the inspection found beyond progress numbers: summary, room
+    # type, defects (type/severity/location/fix), safety issues, materials,
+    # pending work, housekeeping, image quality, and which model produced it.
+    # Null on analyses made before this existed. See gemini_service._normalise.
+    details = Column(JSON, nullable=True)
     analysed_at = Column(DateTime, default=datetime.utcnow)
     room = relationship("Room", back_populates="analyses")
     upload = relationship("MediaUpload", back_populates="analysis")
