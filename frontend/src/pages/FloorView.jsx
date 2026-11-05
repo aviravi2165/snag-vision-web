@@ -6,8 +6,6 @@ import { Spinner, ProgressBar, StatusBadge, ProgressRing, SectionTitle, Empty } 
 import FloorViewNew from './FloorViewNew'
 import { STANDARD_ACTIVITIES } from '../utils/standardActivities'
 
-const NEW_FLOORVIEW_KEY = 'vestigia_new_floorview_enabled'
-
 function heatStyle(pct) {
   if (pct >= 95) return { bg: '#E7F7EF', border: '#B4E5CC', text: '#12A05C' }
   if (pct >= 80) return { bg: '#EDF0FD', border: '#C2CBF8', text: '#3D53E0' }
@@ -240,55 +238,10 @@ function FloorViewClassic() {
   )
 }
 
-// ── Feature toggle: lets you try the new Floor View layout and switch back to
-// the classic one instantly — nothing about FloorViewClassic above is touched. ──
 export default function FloorView() {
-  const [isNewFloorViewEnabled, setIsNewFloorViewEnabled] = useState(
-    () => localStorage.getItem(NEW_FLOORVIEW_KEY) === 'true'
-  )
-
-  const toggle = () => {
-    setIsNewFloorViewEnabled(v => {
-      const next = !v
-      localStorage.setItem(NEW_FLOORVIEW_KEY, String(next))
-      return next
-    })
-  }
-
   return (
-    <div>
-      {/* Thin toggle bar — sits above whichever layout is active, doesn't affect its padding */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-        gap: 8, padding: '10px 28px 0' }}>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-          {isNewFloorViewEnabled ? 'New Floor View layout' : 'Try new Floor View layout'}
-        </span>
-        <div
-          role="switch"
-          aria-checked={isNewFloorViewEnabled}
-          onClick={toggle}
-          title="Toggle between classic and new Floor View layout"
-          style={{
-            width: 38, height: 21, borderRadius: 11, cursor: 'pointer',
-            background: isNewFloorViewEnabled ? 'var(--amber)' : 'var(--border, #D2D9EC)',
-            position: 'relative', transition: 'background .2s', flexShrink: 0,
-          }}
-        >
-          <div style={{
-            position: 'absolute', top: 2, left: isNewFloorViewEnabled ? 19 : 2,
-            width: 17, height: 17, borderRadius: '50%', background: '#fff',
-            transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-          }} />
-        </div>
-      </div>
-
-      {isNewFloorViewEnabled ? (
-        <div style={{ padding: '18px 28px 28px' }}>
-          <FloorViewNew />
-        </div>
-      ) : (
-        <FloorViewClassic />
-      )}
+    <div style={{ padding: '18px 28px 28px' }}>
+      <FloorViewNew />
     </div>
   )
 }

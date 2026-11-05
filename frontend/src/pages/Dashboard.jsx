@@ -8,8 +8,6 @@ import {
 } from 'recharts'
 import DashboardNew from './DashboardNew'
 
-const NEW_DASHBOARD_KEY = 'vestigia_new_dashboard_enabled'
-
 const weeklyMock = [
   { week: 'W1', pct: 30 }, { week: 'W2', pct: 45 },
   { week: 'W3', pct: 60 }, { week: 'W4', pct: 75 },
@@ -168,55 +166,10 @@ function DashboardClassic() {
   )
 }
 
-// ── Feature toggle: try the new activity-based Executive dashboard and switch
-// back to the classic one instantly — nothing about DashboardClassic is touched. ──
 export default function Dashboard() {
-  const [isNewDashboardEnabled, setIsNewDashboardEnabled] = useState(
-    () => localStorage.getItem(NEW_DASHBOARD_KEY) === 'true'
-  )
-
-  const toggle = () => {
-    setIsNewDashboardEnabled(v => {
-      const next = !v
-      localStorage.setItem(NEW_DASHBOARD_KEY, String(next))
-      return next
-    })
-  }
-
   return (
-    <div>
-      {/* Thin toggle bar — sits above whichever layout is active, doesn't affect its padding */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-        gap: 8, padding: '10px 28px 0' }}>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-          {isNewDashboardEnabled ? 'New Executive dashboard' : 'Try new Executive dashboard'}
-        </span>
-        <div
-          role="switch"
-          aria-checked={isNewDashboardEnabled}
-          onClick={toggle}
-          title="Toggle between classic and new Executive dashboard"
-          style={{
-            width: 38, height: 21, borderRadius: 11, cursor: 'pointer',
-            background: isNewDashboardEnabled ? 'var(--amber)' : 'var(--border, #D2D9EC)',
-            position: 'relative', transition: 'background .2s', flexShrink: 0,
-          }}
-        >
-          <div style={{
-            position: 'absolute', top: 2, left: isNewDashboardEnabled ? 19 : 2,
-            width: 17, height: 17, borderRadius: '50%', background: '#fff',
-            transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-          }} />
-        </div>
-      </div>
-
-      {isNewDashboardEnabled ? (
-        <div style={{ padding: '18px 28px 28px' }}>
-          <DashboardNew />
-        </div>
-      ) : (
-        <DashboardClassic />
-      )}
+    <div style={{ padding: '18px 28px 28px' }}>
+      <DashboardNew />
     </div>
   )
 }
