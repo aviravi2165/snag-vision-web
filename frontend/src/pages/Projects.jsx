@@ -1,13 +1,25 @@
 import { useState, useEffect, useRef } from 'react'
 import toast from 'react-hot-toast'
 import {
-  createProject, getFloors, addFloor, getUnits, addUnit, getRooms, addRoom,
+  createProject, updateProject, deleteProject, deleteFloor, deleteUnit, deleteRoom, getFloors, addFloor, getUnits, addUnit, getRooms, addRoom,
   getActivities, setActivities as saveActivities,
   uploadActivityExcel, updateUnitMap,
 } from '../utils/api'
 import { useProject } from '../hooks/useProject'
+import { useAuth } from '../hooks/useAuth'
+import { ConfirmDialog, TrashIcon } from '../components/UI'
 
-const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder, type = 'text' }) => {
+const STATUS_OPTIONS = [
+  { value: 'not_started', label: 'Not Started' },
+  { value: 'ongoing',     label: 'Ongoing' },
+  { value: 'completed',   label: 'Completed' },
+]
+const cap = s => s[0].toUpperCase() + s.slice(1)
+const statusLabel = value => (STATUS_OPTIONS.find(o => o.value === value) || STATUS_OPTIONS[0]).label
+
+// `item.meta` (optional) renders on its own line under the name — outside the
+// row's select button, since a control can't be nested inside a <button>.
+const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder, type = 'text', onDeleteItem, deleteTitle }) => {
   const [val, setVal] = useState('')
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -16,7 +28,7 @@ const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder
         <input type={type} placeholder={addPlaceholder} value={val} min={type === 'number' ? 1 : undefined}
           onChange={e => setVal(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && val && (type !== 'number' || Number(val) > 0)) { onAdd(val); setVal('') } }}
-          style={{ flex: 1 }} />
+          style={{ flex: 1, minWidth: 0 }} />
         <button className="btn-ghost" style={{ whiteSpace: 'nowrap', padding: '8px 12px' }}
           onClick={() => { if (val && (type !== 'number' || Number(val) > 0)) { onAdd(val); setVal('') } }}>+ Add</button>
       </div>
@@ -24,17 +36,37 @@ const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder
         {items.length === 0 ? (
           <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '8px 0' }}>None yet</div>
         ) : items.map(item => (
-          <button key={item.id} onClick={() => onSelect(item.id)} style={{
+          <div key={item.id} style={{
             background: selected === item.id ? 'var(--amber-glow)' : 'transparent',
             border: `1px solid ${selected === item.id ? 'var(--amber-dim)' : 'transparent'}`,
-            color: selected === item.id ? 'var(--amber)' : 'var(--text-2)',
-            borderRadius: 8, padding: '8px 12px', cursor: 'pointer',
-            fontSize: 13, textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            transition: 'all .15s',
+            borderRadius: 8, transition: 'all .15s',
           }}>
-            <span>{item.label}</span>
-            {item.sub !== undefined && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{Math.round(item.sub)}%</span>}
-          </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button onClick={() => onSelect(item.id)} style={{
+                flex: 1, minWidth: 0, background: 'transparent', border: 'none',
+                color: selected === item.id ? 'var(--amber)' : 'var(--text-2)',
+                padding: '8px 12px', cursor: 'pointer',
+                fontSize: 13, textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              }}>
+                <span style={{ overflowWrap: 'anywhere' }}>{item.label}</span>
+                {item.sub !== undefined && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{Math.round(item.sub)}%</span>}
+              </button>
+              {onDeleteItem && (
+                <button onClick={() => onDeleteItem(item)}
+                  title={deleteTitle} aria-label={`${deleteTitle}: ${item.label}`}
+                  style={{
+                    background: 'transparent', border: 'none', color: 'var(--text-4)',
+                    cursor: 'pointer', padding: '8px 10px', lineHeight: 0, borderRadius: 6,
+                    transition: 'color .15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--danger-text)' }}
+                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-4)' }}>
+                  <TrashIcon />
+                </button>
+              )}
+            </div>
+            {item.meta && <div style={{ padding: '0 12px 8px' }}>{item.meta}</div>}
+          </div>
         ))}
       </div>
     </div>
@@ -42,12 +74,19 @@ const Col = ({ title, items, selected, onSelect, onAdd, addLabel, addPlaceholder
 }
 
 export default function Projects() {
-  const { projects, addProject, switchProject } = useProject()
+  const { projects, addProject, removeProject, replaceProject, switchProject } = useProject()
+  // Mirrors the backend's role checks: status can be changed by admins and
+  // project managers, deleting is admin-only. Everyone else sees the status
+  // as a read-only badge and no delete button (rather than a button that 403s).
+  const { user } = useAuth()
+  const canEditStatus = user?.role === 'admin' || user?.role === 'project_manager'
+  const canDelete = user?.role === 'admin'
+  const [savingStatusId, setSavingStatusId] = useState(null)
   const [floors, setFloors] = useState([])
   const [units, setUnits] = useState([])
   const [rooms, setRooms] = useState([])
   const [sel, setSel] = useState({ project: null, floor: null, unit: null })
-  const [newProj, setNewProj] = useState({ name: '', location: '', total_floors: 5, planned_completion: '' })
+  const [newProj, setNewProj] = useState({ name: '', location: '', status: 'not_started' })
 
   // ── Activity Plan (drives the Executive dashboard + AI prompt categories) ──
   // Each entry is { name, target_date } — target_date (YYYY-MM-DD or null) is
@@ -165,18 +204,113 @@ export default function Projects() {
 
   const handleCreate = async () => {
     if (!newProj.name) return
-    const payload = {
-    ...newProj,
-    total_floors: Number(newProj.total_floors),
-    planned_completion: newProj.planned_completion
-      ? new Date(newProj.planned_completion).toISOString()
-      : null,
+    // Floor count and completion date used to be asked here too, but floors
+    // are added one at a time in the Floors column right below, and the
+    // Activity Plan section further down already carries its own (more
+    // useful, per-activity) target dates — asking for a single project-wide
+    // guess of either up front was redundant with both.
+    const payload = { ...newProj, total_floors: 1, planned_completion: null }
+    const { data } = await createProject(payload)
+    addProject(data)
+    toast.success('Project created')
+    setNewProj({ name: '', location: '', status: 'not_started' })
   }
-  const { data } = await createProject(payload)
-  addProject(data)
-  toast.success('Project created')
-  setNewProj({ name: '', location: '', total_floors: 5, planned_completion: '' })
-}
+
+  const handleStatusChange = async (projectId, status) => {
+    setSavingStatusId(projectId)
+    try {
+      const { data } = await updateProject(projectId, { status })
+      replaceProject(data)
+      toast.success(`Status set to ${statusLabel(status)}`)
+    } catch (e) {
+      toast.error(e.response?.status === 403
+        ? 'Only admins and project managers can change the status'
+        : e.response?.data?.detail || 'Failed to update status')
+    } finally {
+      setSavingStatusId(null)
+    }
+  }
+
+  // Read-only badge for everyone; a pill-shaped dropdown for people allowed to
+  // change it. Both use the same status-* colour classes from index.css.
+  const projectStatusMeta = p => {
+    const status = p.status || 'not_started'
+    return canEditStatus ? (
+      <select className={`status-select status-${status}`} value={status}
+        aria-label={`Status of ${p.name}`} disabled={savingStatusId === p.id}
+        onChange={e => handleStatusChange(p.id, e.target.value)}>
+        {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    ) : (
+      <span className={`badge status-${status}`}>{statusLabel(status)}</span>
+    )
+  }
+
+  // ── Delete (project / floor / unit / room) ──────────────────────────────────
+  // Clicking a trash icon only opens the confirm dialog; nothing is deleted
+  // until the dialog's Delete button is pressed. `pending` holds what the dialog will run.
+  const [pending, setPending] = useState(null)   // { kind, label, contents, run }
+  const [removing, setRemoving] = useState(false)
+
+  const confirmRemove = async () => {
+    const { kind, run } = pending
+    setRemoving(true)
+    try {
+      await run()
+      toast.success(`${cap(kind)} deleted`)
+      setPending(null)
+    } catch (e) {
+      toast.error(e.response?.status === 403
+        ? 'Only admins can delete'
+        : e.response?.data?.detail || `Failed to delete ${kind}`)
+    } finally {
+      setRemoving(false)
+    }
+  }
+
+  const handleDeleteProject = item => setPending({
+    kind: 'project', label: item.label,
+    contents: 'every floor, unit, room, photo, walkthrough and issue in this project',
+    run: async () => {
+      await deleteProject(item.id)
+      removeProject(item.id)
+      // Only reset the hierarchy picker if the project being browsed is the
+      // one that just got removed — removing a different project shouldn't
+      // knock the user out of what they're currently looking at.
+      setSel(s => s.project === item.id ? { project: null, floor: null, unit: null } : s)
+    },
+  })
+
+  const handleDeleteFloor = item => setPending({
+    kind: 'floor', label: item.label,
+    contents: "its units, rooms, photos and issues, plus this floor's plan image and hotspots",
+    run: async () => {
+      await deleteFloor(item.id)
+      setFloors(list => list.filter(x => x.id !== item.id))
+      if (sel.floor === item.id) { setUnits([]); setRooms([]) }
+      setSel(s => s.floor === item.id ? { ...s, floor: null, unit: null } : s)
+    },
+  })
+
+  const handleDeleteUnit = item => setPending({
+    kind: 'unit', label: item.label,
+    contents: 'its rooms, photos, AI progress and issues',
+    run: async () => {
+      await deleteUnit(item.id)
+      setUnits(list => list.filter(x => x.id !== item.id))
+      if (sel.unit === item.id) setRooms([])
+      setSel(s => s.unit === item.id ? { ...s, unit: null } : s)
+    },
+  })
+
+  const handleDeleteRoom = item => setPending({
+    kind: 'room', label: item.label,
+    contents: 'its spots, photos and issues',
+    run: async () => {
+      await deleteRoom(item.id)
+      setRooms(list => list.filter(x => x.id !== item.id))
+    },
+  })
 
   return (
     <div style={{ padding: 28, maxWidth: 1000 }}>
@@ -188,7 +322,7 @@ export default function Projects() {
       {/* Create project */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ fontFamily: 'Space Grotesk', fontWeight: 600, fontSize: 14, marginBottom: 14 }}>New project</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 90px 130px auto', gap: 10, alignItems: 'end' }}>
+        <div className="project-form-grid">
           <div>
             <label className="label">Project name</label>
             <input placeholder="Skyline Residency" value={newProj.name} onChange={e => setNewProj({ ...newProj, name: e.target.value })} />
@@ -198,25 +332,23 @@ export default function Projects() {
           <input placeholder="Udaipur" value={newProj.location} onChange={e => setNewProj({ ...newProj, location: e.target.value })} />
         </div>
         <div>
-          <label className="label">Floors</label>
-          <input type="number" min={1} value={newProj.total_floors}
-            onChange={e => setNewProj({ ...newProj, total_floors: e.target.value === '' ? '' : Math.max(1, Number(e.target.value)) })} />
-        </div>
-        <div>
-          <label className="label">Target date</label>
-          <input type="date" value={newProj.planned_completion}
-            onChange={e => setNewProj({ ...newProj, planned_completion: e.target.value })} />
+          <label className="label" htmlFor="new-project-status">Status</label>
+          <select id="new-project-status" value={newProj.status}
+            onChange={e => setNewProj({ ...newProj, status: e.target.value })}>
+            {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         </div>
         <button className="btn-primary" onClick={handleCreate} style={{ alignSelf: 'flex-end' }}>Create project</button>
       </div>
 
       {/* Hierarchy columns */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+      <div className="hierarchy-grid">
         <Col title="Projects" addPlaceholder="Project name" type="text"
-          items={projects.map(p => ({ id: p.id, label: p.name, sub: undefined }))}
+          items={projects.map(p => ({ id: p.id, label: p.name, sub: undefined, meta: projectStatusMeta(p) }))}
           selected={sel.project}
           onSelect={id => { setSel({ project: id, floor: null, unit: null }); switchProject(id) }}
-          onAdd={name => { createProject({ name, total_floors: 5 }).then(({ data }) => { addProject(data); toast.success('Project created') }) }} />
+          onAdd={name => { createProject({ name, total_floors: 1 }).then(({ data }) => { addProject(data); toast.success('Project created') }) }}
+          onDeleteItem={canDelete ? handleDeleteProject : undefined} deleteTitle="Delete Project" />
 
         <Col title="Floors" addPlaceholder="Floor number" type="number"
           items={floors.map(f => ({ id: f.id, label: `Floor ${f.floor_number}`, sub: f.progress_pct }))}
@@ -224,7 +356,8 @@ export default function Projects() {
           onAdd={n => {
             if (!sel.project) { toast.error('Select a project first'); return }
             addFloor(sel.project, { floor_number: Number(n) }).then(({ data }) => setFloors(f => [...f, data]))
-          }} />
+          }}
+          onDeleteItem={canDelete ? handleDeleteFloor : undefined} deleteTitle="Delete Floor" />
 
         <Col title="Units" addPlaceholder="Unit (e.g. A-204)"
           items={units.map(u => ({ id: u.id, label: u.unit_number, sub: u.progress_pct }))}
@@ -232,7 +365,8 @@ export default function Projects() {
           onAdd={n => {
             if (!sel.floor) { toast.error('Select a floor first'); return }
             addUnit(sel.floor, { unit_number: n }).then(({ data }) => setUnits(u => [...u, data]))
-          }} />
+          }}
+          onDeleteItem={canDelete ? handleDeleteUnit : undefined} deleteTitle="Delete Unit" />
 
         <Col title="Rooms" addPlaceholder="Room name"
           items={rooms.map(r => ({ id: r.id, label: r.name, sub: r.progress_pct }))}
@@ -240,7 +374,8 @@ export default function Projects() {
           onAdd={n => {
             if (!sel.unit) { toast.error('Select a unit first'); return }
             addRoom(sel.unit, { name: n }).then(({ data }) => setRooms(r => [...r, data])).then(() => toast.success('Room added'))
-          }} />
+          }}
+          onDeleteItem={canDelete ? handleDeleteRoom : undefined} deleteTitle="Delete Room" />
       </div>
 
       {/* Activity Plan — feeds both the Executive dashboard and the Gemini prompt */}
@@ -342,6 +477,18 @@ export default function Projects() {
         )}
       </div>
     </div>
+
+      <ConfirmDialog
+        open={!!pending}
+        title={pending ? `Delete ${cap(pending.kind)}?` : ''}
+        message={pending
+          ? `Are you sure you want to permanently delete "${pending.label}"? This also removes ${pending.contents}. This action cannot be undone.`
+          : ''}
+        confirmLabel={pending ? `Delete ${cap(pending.kind)}` : 'Delete'}
+        busy={removing}
+        onConfirm={confirmRemove}
+        onCancel={() => setPending(null)}
+      />
     </div>
     )
 }

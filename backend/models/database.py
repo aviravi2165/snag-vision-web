@@ -88,6 +88,10 @@ class Project(Base):
     # so existing web-created projects don't need backfilling.
     folder = Column(String(255), nullable=True)
     city = Column(String(255), nullable=True)
+    # "not_started" | "ongoing" | "completed" — set by hand, not derived from
+    # progress. Nullable because the self-healing migration adds it to existing
+    # databases as NULL; the API reads NULL as "not_started".
+    status = Column(String(20), nullable=True, default="not_started")
     floors = relationship("Floor", back_populates="project", cascade="all, delete")
     milestones = relationship("Milestone", back_populates="project", cascade="all, delete")
     estimated_completion_date = Column(DateTime, nullable=True)
@@ -103,6 +107,20 @@ class Project(Base):
     # aggregation — see services/mapping_service.py:recompute_unit_activity_progress().
     confidence_threshold = Column(Float, nullable=True, default=0.5)
     activities = relationship("Activity", back_populates="project", cascade="all, delete")
+    # These project_id FKs were never given a Project-side relationship, so
+    # DELETE /projects/{id} (below) only ever cascaded Floor->Unit->Room and
+    # Milestone/Activity — every one of these tables would be left behind,
+    # and MSSQL enforces the FK, so deleting any project that had ever had a
+    # walkthrough, a Layout Setup hotspot, or an issue raised against it
+    # (i.e. any project actually used) failed with a raw IntegrityError.
+    floor_plans = relationship("FloorPlan", cascade="all, delete")
+    hotspots = relationship("Hotspot", cascade="all, delete")
+    analysis_jobs = relationship("AnalysisJob", cascade="all, delete")
+    capture_sessions = relationship("CaptureSession", cascade="all, delete")
+    unmapped_components = relationship("UnmappedComponent", cascade="all, delete")
+    activity_excel_file = relationship("ActivityExcelFile", cascade="all, delete")
+    markers = relationship("Marker", cascade="all, delete")
+    issues = relationship("Issue", cascade="all, delete")
 
 class Floor(Base):
     __tablename__ = "floors"
@@ -128,6 +146,11 @@ class Unit(Base):
     progress_pct = Column(Float, default=0.0)
     floor = relationship("Floor", back_populates="units")
     rooms = relationship("Room", back_populates="unit", cascade="all, delete")
+    # Deleting a project reaches these rows through Activity.unit_progress, but
+    # deleting a single Unit (or its Floor) has no such path — without this,
+    # MSSQL rejects the delete on unit_activity_progress.unit_id's FK as soon
+    # as AI analysis has produced any progress for the unit.
+    activity_progress = relationship("UnitActivityProgress", back_populates="unit", cascade="all, delete")
 
 
 class Room(Base):
@@ -174,6 +197,20 @@ class MediaUpload(Base):
     room = relationship("Room", back_populates="uploads")
     supervisor = relationship("User", back_populates="uploads")
     analysis = relationship("AIAnalysis", back_populates="upload", uselist=False, cascade="all, delete")
+    # Same reasoning as Spot.uploads above: markers.origin_upload_id has no
+    # relationship anywhere else, so nothing tells SQLAlchemy a Marker must be
+    # deleted before the MediaUpload it points at. Markers are never deleted
+    # standalone (no such endpoint exists) — only via this cascade or
+    # Project.markers — so this is purely an ordering fix, not a new deletion
+    # policy.
+    origin_markers = relationship("Marker", cascade="all, delete", foreign_keys="Marker.origin_upload_id")
+    # Site Capture's per-pin pointers (hotspot_captures.media_upload_id is a
+    # real FK). Without this, deleting a unit/room/floor/project whose photos
+    # came through Site Capture was rejected by MSSQL — the pointer still
+    # referenced the upload being deleted. A pointer is meaningless once its
+    # upload is gone, so it goes with it.
+    hotspot_captures = relationship("HotspotCapture", cascade="all, delete",
+                                    foreign_keys="HotspotCapture.media_upload_id")
 
 
 class Spot(Base):
@@ -195,6 +232,15 @@ class Spot(Base):
     # models/__init__.py's _ensure_indexes(), which allows unlimited nulls.
     client_spot_id = Column(String(64), nullable=True, index=True)
     room = relationship("Room", back_populates="spots")
+    # media_uploads.spot_id has no relationship() anywhere else linking it back
+    # to Spot (only Room<->MediaUpload and Room<->Spot exist, as independent
+    # siblings). Without this, SQLAlchemy's flush has no relationship-level
+    # knowledge of the spot_id FK, and its DELETE ordering isn't guaranteed to
+    # respect it — confirmed by deleting a project directly: it tried to
+    # DELETE FROM spots before deleting the media_uploads row still pointing
+    # at that spot, and MSSQL correctly rejected it. This relationship is
+    # enough to fix the ordering even though nothing else needs to read it.
+    uploads = relationship("MediaUpload", cascade="all, delete")
 
 
 class AIAnalysis(Base):
@@ -209,6 +255,11 @@ class AIAnalysis(Base):
     prev_overall_pct = Column(Float)   # for change detection
     delta_pct = Column(Float)
     change_flag = Column(String)        # progress / stalled / rework
+    # Everything the inspection found beyond progress numbers: summary, room
+    # type, defects (type/severity/location/fix), safety issues, materials,
+    # pending work, housekeeping, image quality, and which model produced it.
+    # Null on analyses made before this existed. See gemini_service._normalise.
+    details = Column(JSON, nullable=True)
     analysed_at = Column(DateTime, default=datetime.utcnow)
     room = relationship("Room", back_populates="analyses")
     upload = relationship("MediaUpload", back_populates="analysis")
@@ -244,6 +295,10 @@ class Hotspot(Base):
     room_id = Column(String(255))
     room_name = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Needed for Project.hotspots' own cascade to fully succeed — without
+    # this, deleting a Hotspot (as part of deleting its project) would itself
+    # hit hotspot_captures.hotspot_id's FK.
+    captures = relationship("HotspotCapture", cascade="all, delete")
 
 
 class HotspotCapture(Base):
@@ -378,7 +433,7 @@ class UnitActivityProgress(Base):
     overridden_by = Column(String(36), nullable=True)
     overridden_at = Column(DateTime, nullable=True)
 
-    unit = relationship("Unit")
+    unit = relationship("Unit", back_populates="activity_progress")
     activity = relationship("Activity", back_populates="unit_progress")
 
     @property

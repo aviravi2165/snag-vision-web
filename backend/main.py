@@ -6,7 +6,7 @@ from pathlib import Path
 from config import settings
 from models import init_db, SessionLocal
 from routers import auth, projects, uploads, analysis, mobile, site, analysis_jobs, walkthroughs, issues
-from services.job_worker import job_worker_loop
+from services.job_worker import job_worker_loop, recover_interrupted_jobs
 from seed import seed_demo_data
 
 app = FastAPI(
@@ -52,7 +52,9 @@ async def on_startup():
     finally:
         db.close()
     # "Start AI Analysis" jobs are processed by this in-process polling worker —
-    # single-instance-safe; see services/job_worker.py.
+    # single-instance-safe; see services/job_worker.py. Jobs a previous run was
+    # in the middle of are re-queued first, so a restart never strands them.
+    recover_interrupted_jobs()
     asyncio.create_task(job_worker_loop())
 
 

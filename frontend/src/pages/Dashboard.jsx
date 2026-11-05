@@ -7,12 +7,9 @@ import {
   Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
 import DashboardNew from './DashboardNew'
+import { AiInsights, useProjectInsights } from '../components/AiInsights'
 
-const weeklyMock = [
-  { week: 'W1', pct: 30 }, { week: 'W2', pct: 45 },
-  { week: 'W3', pct: 60 }, { week: 'W4', pct: 75 },
-  { week: 'W5', pct: 83 }, { week: 'Now', pct: null },
-]
+const NEW_DASHBOARD_KEY = 'vestigia_new_dashboard_enabled'
 
 // ── Custom light-theme tooltip ─────────────────────────────────────────────
 const LightTooltip = ({ active, payload, label }) => {
@@ -32,7 +29,7 @@ const LightTooltip = ({ active, payload, label }) => {
   )
 }
 
-function DashboardClassic() {
+function DashboardClassic({ trend }) {
   const { selectedProject } = useProject()
   const [dashboard, setDashboard] = useState(null)
   const [loading,   setLoading]   = useState(true)
@@ -94,11 +91,15 @@ function DashboardClassic() {
 
         {/* Line chart */}
         <div className="card">
-          <SectionTitle>Weekly progress trend</SectionTitle>
+          <SectionTitle>Progress trend</SectionTitle>
+          <div style={{ fontSize: 11, color: '#6A7699', margin: '-8px 0 8px' }}>Average completion of the rooms inspected so far</div>
+          {trend.length === 0 ? (
+            <Empty message="No captures yet" hint="The trend appears once photos have been analysed" />
+          ) : (
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={weeklyMock}>
+            <LineChart data={trend}>
               <CartesianGrid strokeDasharray="3 3" stroke="#EDEFF7" vertical={false} />
-              <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#6A7699' }}
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6A7699' }}
                 axisLine={false} tickLine={false} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#6A7699' }}
                 axisLine={false} tickLine={false} />
@@ -112,6 +113,7 @@ function DashboardClassic() {
               />
             </LineChart>
           </ResponsiveContainer>
+          )}
         </div>
 
         {/* Bar chart */}
@@ -167,9 +169,67 @@ function DashboardClassic() {
 }
 
 export default function Dashboard() {
+  const { selectedProject } = useProject()
+  // One fetch feeds both the AI section and the classic layout's trend chart.
+  // (This chart used to be a hard-coded W1..W5 series — invented numbers shown as live data.)
+  const insights = useProjectInsights(selectedProject?.id)
+  const trend = (insights.data?.trend || []).map(p => ({
+    label: new Date(p.date + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+    pct: p.pct,
+  }))
+  const [isNewDashboardEnabled, setIsNewDashboardEnabled] = useState(
+    () => localStorage.getItem(NEW_DASHBOARD_KEY) === 'true'
+  )
+
+  const toggle = () => {
+    setIsNewDashboardEnabled(v => {
+      const next = !v
+      localStorage.setItem(NEW_DASHBOARD_KEY, String(next))
+      return next
+    })
+  }
+
   return (
-    <div style={{ padding: '18px 28px 28px' }}>
-      <DashboardNew />
+    <div>
+      {/* Thin toggle bar — sits above whichever layout is active, doesn't affect its padding */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        gap: 8, padding: '10px 28px 0' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          {isNewDashboardEnabled ? 'New Executive dashboard' : 'Try new Executive dashboard'}
+        </span>
+        <div
+          role="switch"
+          aria-checked={isNewDashboardEnabled}
+          onClick={toggle}
+          title="Toggle between classic and new Executive dashboard"
+          style={{
+            width: 38, height: 21, borderRadius: 11, cursor: 'pointer',
+            background: isNewDashboardEnabled ? 'var(--amber)' : 'var(--border, #D2D9EC)',
+            position: 'relative', transition: 'background .2s', flexShrink: 0,
+          }}
+        >
+          <div style={{
+            position: 'absolute', top: 2, left: isNewDashboardEnabled ? 19 : 2,
+            width: 17, height: 17, borderRadius: '50%', background: '#fff',
+            transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+          }} />
+        </div>
+      </div>
+
+      {isNewDashboardEnabled ? (
+        <div style={{ padding: '18px 28px 28px' }}>
+          <DashboardNew />
+        </div>
+      ) : (
+        <DashboardClassic trend={trend} />
+      )}
+
+      {/* AI findings sit under both layouts, so they show whichever one is active. */}
+      {selectedProject && (
+        <div style={{ padding: '0 28px 28px', maxWidth: isNewDashboardEnabled ? undefined : 1100 }}>
+          <AiInsights key={selectedProject.id} insights={insights} />
+        </div>
+      )}
     </div>
   )
 }

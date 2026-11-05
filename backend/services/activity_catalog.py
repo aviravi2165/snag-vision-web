@@ -17,7 +17,6 @@ the Executive dashboard through the per-project mapping machinery.
 """
 
 import json
-from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -25,8 +24,7 @@ from sqlalchemy.orm import Session
 from models.database import (
     ActivityMapping, StandardComponentMapping, AIAnalysis,
 )
-from services.gemini_service import _get_client
-from google.genai import types
+from services.gemini_service import generate_json
 
 STANDARD_ACTIVITIES: List[str] = [
     "Structural and Civil Works",
@@ -113,8 +111,13 @@ async def refresh_standard_classification(db: Session) -> dict:
         if a.components:
             keys.update(a.components.keys())
     total = len(keys)
-    if not total:
-        return {"classified": 0, "total_keys": 0}
+    # Only labels never classified before. Re-sending known ones wasted tokens
+    # on every run — and the update branch below used to overwrite their
+    # category, silently undoing any manual correction.
+    existing = {r.component_key: r for r in db.query(StandardComponentMapping).all()}
+    keys -= set(existing)
+    if not keys:
+        return {"classified": 0, "total_keys": total}
 
     bullets = "\n".join(f"- {n}" for n in STANDARD_ACTIVITIES)
     labels = json.dumps(sorted(keys))
@@ -136,20 +139,13 @@ is an object: {{"activity": "<exact category name from the list>",
 "confidence": <0.0-1.0>}}. Omit labels that fit no category.
 """
     try:
-        response = await _get_client().aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[prompt],
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        data = json.loads(response.text)
+        data = await generate_json(prompt)
     except Exception as e:
         print(f"refresh_standard_classification error: {e}")
         return {"classified": 0, "total_keys": total}
 
     category_set = set(STANDARD_ACTIVITIES)
-    existing = {r.component_key: r for r in db.query(StandardComponentMapping).all()}
     classified = 0
-    now = datetime.utcnow()
     for key, entry in (data or {}).items():
         if isinstance(entry, dict):
             category = entry.get("activity")
@@ -160,16 +156,10 @@ is an object: {{"activity": "<exact category name from the list>",
             continue
         if not category or category not in category_set or key not in keys:
             continue
-        row = existing.get(key)
-        if row:
-            # Never downgrade an existing row on refresh — keep manual fixes.
-            row.category = category
-            row.updated_at = now
-        else:
-            db.add(StandardComponentMapping(
-                component_key=key, category=category,
-                confidence=float(confidence or 0.9),
-            ))
+        db.add(StandardComponentMapping(
+            component_key=key, category=category,
+            confidence=float(confidence or 0.9),
+        ))
         classified += 1
     db.commit()
     return {"classified": classified, "total_keys": total}

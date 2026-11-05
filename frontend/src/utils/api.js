@@ -33,6 +33,11 @@ export const register = (data) => api.post('/auth/register', data)
 // ─── Projects ────────────────────────────────────────────────────────────────
 export const getProjects = () => api.get('/projects')
 export const createProject = (data) => api.post('/projects', data)
+export const updateProject = (id, data) => api.patch(`/projects/${id}`, data)
+export const deleteProject = (id) => api.delete(`/projects/${id}`)
+export const deleteFloor = (floorId) => api.delete(`/projects/floors/${floorId}`)
+export const deleteUnit = (unitId) => api.delete(`/projects/units/${unitId}`)
+export const deleteRoom = (roomId) => api.delete(`/projects/rooms/${roomId}`)
 export const getDashboard = (id) => api.get(`/projects/${id}/dashboard`)
 export const getFloors = (id) => api.get(`/projects/${id}/floors`)
 export const addFloor = (id, data) => api.post(`/projects/${id}/floors`, data)
@@ -92,6 +97,7 @@ export const uploadMedia = (formData) =>
 export const getRoomUploads = (roomId) => api.get(`/uploads/room/${roomId}`)
 export const getRoomAnalysis = (roomId) => api.get(`/analysis/room/${roomId}/latest`)
 export const getChangeDetection = (roomId) => api.get(`/analysis/room/${roomId}/change-detection`)
+export const getProjectInsights = (projectId) => api.get(`/analysis/project/${projectId}/insights`)
 
 // ─── Markers + Issue Management (Site Photo Viewer) ─────────────────────────
 // Markers are anchored to a location (the Spot/sub-Room the viewer resolves

@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+
 // ─── Progress Ring ────────────────────────────────────────────────────────────
 export function ProgressRing({ pct, size = 72, strokeWidth = 5, label }) {
   const r      = (size - strokeWidth * 2) / 2
@@ -107,6 +109,84 @@ export function Spinner() {
         borderRadius: '50%',
         animation: 'spin .7s linear infinite',
       }} />
+    </div>
+  )
+}
+
+// ─── Trash icon ───────────────────────────────────────────────────────────────
+// Drawn as SVG rather than the 🗑 emoji: emoji render differently on every OS
+// and browser (colour, size, baseline), so they never sit cleanly in a row.
+export function TrashIcon({ size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  )
+}
+
+// ─── Confirm dialog ───────────────────────────────────────────────────────────
+// In-app replacement for window.confirm on destructive actions. Cancel is the
+// focused default, so a stray Enter can't delete anything; Escape or clicking
+// the backdrop also cancels. `busy` locks both buttons while the request runs.
+export function ConfirmDialog({ open, title, message, confirmLabel = 'Delete', busy, onConfirm, onCancel }) {
+  const cancelRef = useRef(null)
+  // Latest props via a ref, so callers can pass inline functions without the
+  // key listener being re-attached (and focus re-grabbed) on every render.
+  const latest = useRef({ busy, onCancel })
+  latest.current = { busy, onCancel }
+
+  useEffect(() => {
+    if (!open) return
+    cancelRef.current?.focus()
+    const onKey = e => {
+      if (e.key === 'Escape' && !latest.current.busy) latest.current.onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  if (!open) return null
+  return (
+    <div onClick={() => !busy && onCancel()} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+    }}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-msg"
+        className="card" onClick={e => e.stopPropagation()}
+        style={{ maxWidth: 420, width: '90%', padding: 22 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 18 }}>
+          <div style={{
+            flexShrink: 0, width: 36, height: 36, borderRadius: '50%',
+            background: 'var(--danger-bg)', color: 'var(--danger-text)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <TrashIcon size={17} />
+          </div>
+          <div>
+            <div id="confirm-title" style={{ fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 16,
+              color: 'var(--text-1)', marginBottom: 6 }}>
+              {title}
+            </div>
+            <p id="confirm-msg" style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5 }}>{message}</p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button ref={cancelRef} className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button onClick={onConfirm} disabled={busy} style={{
+            background: 'var(--danger-text)', color: '#FFFFFF', border: 'none',
+            borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600,
+            fontFamily: "'Space Grotesk', sans-serif", cursor: busy ? 'default' : 'pointer',
+            opacity: busy ? 0.6 : 1,
+          }}>
+            {busy ? 'Deleting…' : confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -6,9 +6,8 @@ from models.database import (
 )
 from schemas.models import ProjectMediaOut, UploadOut
 from services.gcs_service import upload_media
-from services.gemini_service import analyse_image, compute_change_flag
-from services.progress_service import full_rollup
 from services.walkthrough_service import project_room_ids, require_capturable
+from services.image_service import detect_media_type
 from routers.walkthroughs import _walkthrough_out
 from routers.auth import get_current_user
 from typing import List
@@ -82,7 +81,10 @@ async def upload_file(
         raise HTTPException(413, f"File too large (max {MAX_SIZE_MB} MB)")
 
     mime = file.content_type or mimetypes.guess_type(file.filename)[0] or "image/jpeg"
-    media_type_label = "photo" if "image" in mime else "video" if "video" in mime else "360"
+    # Actual pixel shape, not a mime-type guess — a JPEG is "image/jpeg"
+    # whether it's a phone snapshot or a stitched 360 equirectangular photo,
+    # so mime alone can never tell them apart (see services/image_service.py).
+    media_type_label = detect_media_type(contents, mime)
 
     # Derive project_id from the room hierarchy (web: Unit -> Floor; mobile:
     # flat Room -> Floor).
@@ -120,79 +122,6 @@ async def upload_file(
 
     return upload
 
-
-async def _run_analysis(
-    upload_id: str,
-    room_name: str,
-    image_bytes: bytes,
-    mime: str,
-    db: Session,
-    project_id: str = None,
-):
-    """Background task: call Gemini, store result, rollup progress."""
-    upload = db.query(MediaUpload).get(upload_id)
-    if not upload:
-        return
-
-    try:
-        # Project's custom Activity Plan (if set) drives which categories Gemini
-        # scores — falls back to the default furniture-category list when unset.
-        activity_names = None
-        if project_id:
-            project = db.query(Project).get(project_id)
-            if project and project.activity_plan:
-                # activity_plan entries are {name, target_date} dicts (older
-                # projects may still have plain strings) — only the name
-                # feeds the Gemini prompt.
-                activity_names = [
-                    a["name"] if isinstance(a, dict) else a
-                    for a in project.activity_plan
-                ]
-
-        # 1. Gemini se response lijiye
-        raw_data, overall_pct, notes = await analyse_image(
-            image_bytes, mime, room_name, activity_names=activity_names
-        )
-
-        # 2. components mein se overall_pct aur notes ko alag kar lijiye 
-        # taaki Radar Chart ko sirf saaf-suthra metrics mile
-        component_metrics = {
-            k: v for k, v in raw_data.items() 
-            if v is not None and k not in ["overall_pct", "notes"]
-        }
-
-        # 3. Previous analysis check karein change detection ke liye
-        prev = (
-            db.query(AIAnalysis)
-            .filter(AIAnalysis.room_id == upload.room_id)
-            .order_by(AIAnalysis.analysed_at.desc())
-            .first()
-        )
-        prev_pct = prev.overall_pct if prev else None
-        delta, flag = compute_change_flag(prev_pct, overall_pct)
-
-        # 4. Database mein save karein
-        analysis = AIAnalysis(
-            room_id=upload.room_id,
-            upload_id=upload_id,
-            components=component_metrics,  # 🟢 Ab yahan ekdum clean data jayega
-            overall_pct=overall_pct,
-            ai_notes=notes,
-            prev_overall_pct=prev_pct,
-            delta_pct=delta,
-            change_flag=flag,
-        )
-        db.add(analysis)
-        upload.status = UploadStatus.done
-        db.commit()
-
-        full_rollup(upload.room_id, db)
-
-    except Exception as e:
-        upload.status = UploadStatus.failed
-        db.commit()
-        print(f"Error in background analysis: {str(e)}")
-        raise
 
 @router.get("/room/{room_id}", response_model=List[UploadOut])
 def get_room_uploads(room_id: str, db: Session = Depends(get_db)):

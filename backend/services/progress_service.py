@@ -2,6 +2,7 @@
 Progress aggregation service.
 Rolls up room-level AI analysis results through unit → floor → project hierarchy.
 """
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 from models.database import Project, Floor, Unit, Room, AIAnalysis
 from typing import Optional
@@ -72,6 +73,33 @@ def full_rollup(room_id: str, db: Session):
             recalc_floor(floor.id, db)
 
 
+def _count_delayed_rooms(project: Project, db: Session) -> int:
+    """Rooms of THIS project whose latest analysis is flagged rework, or stalled
+    while still unfinished. This used to count every stalled/rework analysis in
+    the whole database — other projects' included, and old visits that a newer
+    one had already superseded. A room at 95%+ that hasn't changed since the
+    last visit is simply finished, not delayed."""
+    room_ids = [r.id for f in project.floors for u in f.units for r in u.rooms]
+    room_ids += [r.id for f in project.floors for r in f.rooms]
+    if not room_ids:
+        return 0
+    latest_at = (
+        db.query(AIAnalysis.room_id, func.max(AIAnalysis.analysed_at).label("at"))
+        .filter(AIAnalysis.room_id.in_(room_ids))
+        .group_by(AIAnalysis.room_id)
+        .subquery()
+    )
+    latest = (
+        db.query(AIAnalysis)
+        .join(latest_at, and_(AIAnalysis.room_id == latest_at.c.room_id, AIAnalysis.analysed_at == latest_at.c.at))
+        .all()
+    )
+    return sum(
+        1 for a in latest
+        if a.change_flag == "rework" or (a.change_flag == "stalled" and (a.overall_pct or 0) < 95)
+    )
+
+
 def build_dashboard(project_id: str, db: Session) -> dict:
     """Build full hierarchical progress dict for executive dashboard."""
     project = db.query(Project).get(project_id)
@@ -118,12 +146,7 @@ def build_dashboard(project_id: str, db: Session) -> dict:
         sum(all_floor_pcts) / len(all_floor_pcts), 1
     ) if all_floor_pcts else 0.0
 
-    # Count delayed rooms (stalled or rework flags in latest analyses)
-    delayed = (
-        db.query(AIAnalysis)
-        .filter(AIAnalysis.change_flag.in_(["stalled", "rework"]))
-        .count()
-    )
+    delayed = _count_delayed_rooms(project, db)
 
     return {
         "project_id": project.id,

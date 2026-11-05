@@ -6,18 +6,18 @@ and its own auth/upload flow here, backed by the same underlying tables.
 """
 import mimetypes
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Header, Form, File, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Header, Form, File, UploadFile
 from sqlalchemy.orm import Session, selectinload
 from jose import jwt, JWTError
 
 from config import settings
 from models import get_db
-from models.database import User, Project, Floor, Unit, Room, Spot, FloorPlan, Hotspot, MediaUpload, UploadStatus, UserRole
+from models.database import User, Project, Floor, Unit, Room, Spot, FloorPlan, Hotspot, HotspotCapture, MediaUpload, UploadStatus, UserRole
 from schemas.models import LoginIn, MobileSpotCreate, UserCreate
 from routers.auth import verify_pw, hash_pw, create_token, ALGORITHM
-from routers.uploads import _run_analysis
 from services.gcs_service import upload_media
 from services.walkthrough_service import require_capturable
+from services.image_service import detect_media_type
 
 router = APIRouter(prefix="/mobile", tags=["mobile"])
 
@@ -254,9 +254,18 @@ def mobile_structure(project_id: str, db: Session = Depends(get_db), user_id: st
 
 # ── Uploads ───────────────────────────────────────────────────────────────────
 
+def _hotspot_for_spot(spot_id: str, db: Session):
+    """The Layout Setup hotspot a spot was materialised from (client_spot_id
+    'hotspot:<id>', see _sync_hotspots_to_spots), or None for an ordinary spot."""
+    spot = db.query(Spot).get(spot_id) if spot_id else None
+    key = (spot.client_spot_id or "") if spot else ""
+    if not key.startswith("hotspot:"):
+        return None
+    return db.query(Hotspot).get(key[len("hotspot:"):])
+
+
 @router.post("/uploads/photo")
 async def upload_photo(
-    background_tasks: BackgroundTasks,
     photoId: str = Form(...),
     projectId: str = Form(...),
     roomId: str = Form(...),
@@ -276,10 +285,22 @@ async def upload_photo(
     if not room:
         raise HTTPException(404, "Room not found")
 
+    # A photo taken at a Layout Setup point belongs to the real room that point
+    # is linked to — the same room web Site Capture files it under. The app
+    # only knows the floor's auto-created "Layout" room the point is shown in;
+    # filed there, the photo sat outside the Floor > Unit > Room hierarchy, so
+    # its AI results never reached the room, unit, dashboards or Activity
+    # matrix, and walkthrough completeness kept reporting the point as missed.
+    hotspot = _hotspot_for_spot(spotId, db)
+    if hotspot and hotspot.room_id:
+        linked = db.query(Room).get(hotspot.room_id)
+        if linked:
+            room, roomId = linked, linked.id
+
     # Same shared gate as Site Capture and the web Upload page: every capture
-    # origin writes into the project's active walkthrough (400 otherwise).
-    # Mobile photos analyse immediately (status=analysing below), but the stamp
-    # still groups them into the walkthrough for the Media Manager.
+    # origin writes into the project's active walkthrough (400 otherwise), and
+    # like them is stored as `pending` — analysed by "Start AI Analysis" through
+    # the one shared pipeline (services/job_worker.py), not a separate path.
     project_id = None
     if room.unit and room.unit.floor:
         project_id = room.unit.floor.project_id
@@ -302,19 +323,20 @@ async def upload_photo(
         supervisor_id=user_id,
         gcs_url=gcs_url,
         gcs_path=gcs_path,
-        media_type="photo",
+        media_type=detect_media_type(contents, mime),
         file_name=image.filename,
         notes=f"checksum:{checksum}" if checksum else None,
-        status=UploadStatus.analysing,
+        status=UploadStatus.pending,
         client_photo_id=photoId,
         walkthrough_id=wt.id,
     )
     db.add(upload)
+    db.flush()
+    if hotspot:
+        # Same pointer Site Capture writes, so its pin shows this capture too.
+        db.add(HotspotCapture(hotspot_id=hotspot.id, image_url=gcs_url, media_upload_id=upload.id))
     db.commit()
     db.refresh(upload)
-
-    if "image" in mime:
-        background_tasks.add_task(_run_analysis, upload.id, room.name, contents, mime, db)
 
     return {"id": upload.id, "status": upload.status.value}
 
