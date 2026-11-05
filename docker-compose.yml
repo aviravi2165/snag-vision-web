@@ -38,7 +38,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://postgres:password@db:5432/siteiq
+      DATABASE_URL: "postgresql://postgres:password@db:5432/siteiq"
       CHROMA_HOST: chromadb
       CHROMA_PORT: 8000
 

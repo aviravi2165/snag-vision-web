@@ -168,8 +168,6 @@ function DashboardClassic({ trend }) {
   )
 }
 
-// ── Feature toggle: try the new activity-based Executive dashboard and switch
-// back to the classic one instantly — nothing about DashboardClassic is touched. ──
 export default function Dashboard() {
   const { selectedProject } = useProject()
   // One fetch feeds both the AI section and the classic layout's trend chart.
